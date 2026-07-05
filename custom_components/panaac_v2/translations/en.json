@@ -1,0 +1,17 @@
+{
+  "title": "Panasonic AC v2 (MQTT)",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure PanaAC v2",
+        "description": "Enter the MQTT topic prefix used by the ESPHome device.",
+        "data": {
+          "topic_prefix": "MQTT topic prefix"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}

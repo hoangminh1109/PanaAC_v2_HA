@@ -1,0 +1,12 @@
+{
+  "domain": "panaac_v2",
+  "name": "Panasonic AC v2 (MQTT)",
+  "codeowners": ["@hoangminh1109"],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "documentation": "https://github.com/hoangminh1109/PanaAC_v2_HA",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/hoangminh1109/PanaAC_v2_HA/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
