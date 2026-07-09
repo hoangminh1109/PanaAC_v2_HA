@@ -1,5 +1,12 @@
 {
   "title": "Panasonic AC v2 (MQTT)",
+  "entity": {
+    "climate": {
+      "remote_controller": {
+        "name": "Remote Controller"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

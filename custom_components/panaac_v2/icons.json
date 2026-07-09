@@ -1,0 +1,44 @@
+{
+  "entity": {
+    "climate": {
+      "remote_controller": {
+        "state_attributes": {
+          "fan_mode": {
+            "default": "mdi:fan",
+            "state": {
+              "Auto": "mdi:fan-auto",
+              "Level 1": "mdi:numeric-1",
+              "Level 2": "mdi:numeric-2",
+              "Level 3": "mdi:numeric-3",
+              "Level 4": "mdi:numeric-4",
+              "Level 5": "mdi:numeric-5",
+              "Quiet": "mdi:weather-night"
+            }
+          },
+          "swing_mode": {
+            "default": "mdi:arrow-up-down",
+            "state": {
+              "Auto": "mdi:arrow-oscillating",
+              "Highest": "mdi:arrow-collapse-up",
+              "High": "mdi:arrow-up",
+              "Middle": "mdi:arrow-up-down",
+              "Low": "mdi:arrow-down",
+              "Lowest": "mdi:arrow-collapse-down"
+            }
+          },
+          "swing_horizontal_mode": {
+            "default": "mdi:arrow-left-right",
+            "state": {
+              "Auto": "mdi:arrow-oscillating",
+              "Left Max": "mdi:arrow-collapse-left",
+              "Left": "mdi:arrow-left",
+              "Middle": "mdi:arrow-left-right",
+              "Right": "mdi:arrow-right",
+              "Right Max": "mdi:arrow-collapse-right"
+            }
+          }
+        }
+      }
+    }
+  }
+}

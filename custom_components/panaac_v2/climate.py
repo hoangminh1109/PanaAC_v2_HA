@@ -79,6 +79,9 @@ class PanaACV2Climate(ClimateEntity):
     _attr_min_temp = 16
     _attr_max_temp = 30
     _attr_target_temperature_step = 0.5
+    # Enables per-fan-mode icons from icons.json (entity.climate.remote_controller).
+    # _attr_name below still wins for the entity name.
+    _attr_translation_key = "remote_controller"
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the climate entity."""
@@ -94,13 +97,15 @@ class PanaACV2Climate(ClimateEntity):
             model="Panasonic AC v3",
         )
 
+        # Initial placeholder state (matches the device's fresh-boot defaults: off, 26 °C, fan
+        # Auto, vertical swing Auto, horizontal swing Auto). Overwritten by the first MQTT state.
         self._attr_available = False
         self._current_temperature: float | None = None
-        self._target_temperature = 24.0
+        self._target_temperature = 26.0
         self._hvac_mode = HVACMode.OFF
         self._fan_mode = "Auto"
-        self._swing_mode = "Middle"
-        self._swing_horizontal_mode: str | None = None
+        self._swing_mode = "Auto"
+        self._swing_horizontal_mode = "Auto"
 
         self._sub_state: dict | None = None
 
