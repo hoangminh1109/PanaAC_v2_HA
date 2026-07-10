@@ -119,6 +119,14 @@ class PanaACV2Climate(ClimateEntity):
         )
         if self._attr_swing_horizontal_modes:
             features |= ClimateEntityFeature.SWING_HORIZONTAL_MODE
+        # Advertise turn on/off when the climate has more than one HVAC mode and
+        # supports OFF, so it is detected as a thermostat in automations/scripts
+        # (matches the built-in esphome climate). The base ClimateEntity
+        # async_turn_on/async_turn_off forward to async_set_hvac_mode (OFF, or a
+        # fake-on to the first available heat/cool mode), which publishes to the
+        # device set topic.
+        if len(self.hvac_modes) > 1 and HVACMode.OFF in self.hvac_modes:
+            features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
         return features
 
     @property
