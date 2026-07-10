@@ -21,7 +21,7 @@
               "Auto": "mdi:arrow-oscillating",
               "Highest": "mdi:arrow-collapse-up",
               "High": "mdi:arrow-up",
-              "Middle": "mdi:arrow-up-down",
+              "Middle": "mdi:drag-horizontal-variant",
               "Low": "mdi:arrow-down",
               "Lowest": "mdi:arrow-collapse-down"
             }
@@ -32,7 +32,7 @@
               "Auto": "mdi:arrow-oscillating",
               "Left Max": "mdi:arrow-collapse-left",
               "Left": "mdi:arrow-left",
-              "Middle": "mdi:arrow-left-right",
+              "Middle": "mdi:drag-vertical-variant",
               "Right": "mdi:arrow-right",
               "Right Max": "mdi:arrow-collapse-right"
             }

@@ -89,7 +89,7 @@ class PanaACV2Climate(ClimateEntity):
         self._entry = entry
         self._topic_prefix = entry.data[CONF_TOPIC_PREFIX]
         self._attr_unique_id = f"{self._topic_prefix}_climate"
-        self._attr_name = "Remote Controller"
+        self._attr_name = "Remote Controller (v2)"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._topic_prefix)},
             name=entry.data.get(CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME),
