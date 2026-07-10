@@ -1,6 +1,6 @@
 {
   "domain": "panaac_v2",
-  "name": "Panasonic AC v2 (MQTT)",
+  "name": "PanaAC v2 (MQTT)",
   "codeowners": ["@hoangminh1109"],
   "config_flow": true,
   "dependencies": ["mqtt"],

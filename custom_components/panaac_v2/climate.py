@@ -20,7 +20,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_TOPIC_PREFIX, DOMAIN
+from .const import CONF_DEVICE_NAME, CONF_TOPIC_PREFIX, DEFAULT_DEVICE_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,9 +92,9 @@ class PanaACV2Climate(ClimateEntity):
         self._attr_name = "Remote Controller"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._topic_prefix)},
-            name="PanaAC v2",
+            name=entry.data.get(CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME),
             manufacturer="ESPHome",
-            model="Panasonic AC v3",
+            model="PanaAC v2",
         )
 
         # Initial placeholder state (matches the device's fresh-boot defaults: off, 26 °C, fan

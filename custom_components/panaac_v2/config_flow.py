@@ -5,7 +5,13 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX, DOMAIN
+from .const import (
+    CONF_DEVICE_NAME,
+    CONF_TOPIC_PREFIX,
+    DEFAULT_DEVICE_NAME,
+    DEFAULT_TOPIC_PREFIX,
+    DOMAIN,
+)
 
 
 class PanaACV2ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -22,13 +28,18 @@ class PanaACV2ConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(topic_prefix)
             self._abort_if_unique_id_configured()
             return self.async_create_entry(
-                title=f"PanaAC v2 ({topic_prefix})",
+                title=f"{user_input[CONF_DEVICE_NAME]} ({topic_prefix})",
                 data=user_input,
             )
 
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX): str,
+                vol.Required(
+                    CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME
+                ): str,
+                vol.Required(
+                    CONF_TOPIC_PREFIX, default=DEFAULT_TOPIC_PREFIX
+                ): str,
             }
         )
         return self.async_show_form(
