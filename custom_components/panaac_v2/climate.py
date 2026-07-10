@@ -246,10 +246,20 @@ class PanaACV2Climate(ClimateEntity):
         await self._publish_command({"mode": hvac_mode.value})
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Set a new target temperature."""
-        temperature = kwargs.get("temperature")
-        if temperature is not None:
-            await self._publish_command({"target_temperature": temperature})
+        """Set a new target temperature, and the HVAC mode if provided.
+
+        The climate.set_temperature service (and the "set thermostat target
+        temperature" device action) can carry an hvac_mode alongside the target
+        temperature. Publish both in one command so a single call changes both,
+        matching the ESPHome climate behaviour.
+        """
+        command: dict = {}
+        if (temperature := kwargs.get("temperature")) is not None:
+            command["target_temperature"] = temperature
+        if (hvac_mode := kwargs.get("hvac_mode")) is not None:
+            command["mode"] = hvac_mode.value
+        if command:
+            await self._publish_command(command)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set a new fan mode."""
