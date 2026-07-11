@@ -9,7 +9,7 @@ its `Result:` line and commit this file to the `testing/full-test` branch.
   `ha/core` with the workspace `core/.venv` (Python 3.14, `uv`). Bring it up
   with the `ha-dev-setup` skill, or:
   ```
-  cd /home/hoangminh/AgentsWork/Claude/HA/ha/core
+  cd /home/hoangminh/AgentsWork/Codex/HA/ha/core
   echo 'mnhmnh' | sudo -S systemctl start mosquitto   # broker
   nohup ./.venv/bin/hass -c config > /tmp/ha_core_run.log 2>&1 &
   ```
