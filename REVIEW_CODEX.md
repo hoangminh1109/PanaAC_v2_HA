@@ -1,14 +1,6 @@
 # Codex Review
 
-## Re-review update (2026-07-11)
-
-Reviewed `origin/bugfix/fix-codex-findings`.
-
-Result: all three findings below appear fixed in the branch revision I reviewed. I did not identify a remaining correctness issue in the updated implementation or the synchronized documentation.
-
-## ~~Issue 1: the entity is still configured as a polling entity~~
-
-Status: fixed on `bugfix/fix-codex-findings`.
+## Issue 1: the entity is still configured as a polling entity
 
 **Problem**
 
@@ -26,9 +18,7 @@ Relevant code:
 
 Set `_attr_should_poll = False` on the entity class so Home Assistant treats it as a pure push entity.
 
-## ~~Issue 2: unsupported capabilities are advertised before the first `traits` payload arrives~~
-
-Status: fixed on `bugfix/fix-codex-findings`.
+## Issue 2: unsupported capabilities are advertised before the first `traits` payload arrives
 
 **Problem**
 
@@ -48,9 +38,7 @@ Relevant code:
 
 Initialize the entity with conservative capabilities, ideally just the minimal shape needed to render safely, and only expose the full control set after a valid `traits` payload has been received. In practice that means starting with empty or minimal mode lists and no horizontal swing feature.
 
-## ~~Issue 3: the repository documentation is stale and internally inconsistent~~
-
-Status: fixed on `bugfix/fix-codex-findings`.
+## Issue 3: the repository documentation is stale and internally inconsistent
 
 **Problem**
 
