@@ -49,7 +49,7 @@ The integration expects the same topic layout as the ESPHome component:
 |--------------|-----------|----------|---------|
 | `availability` | device → HA | yes | `online` / `offline` |
 | `traits` | device → HA | yes | capabilities JSON |
-| `state` | device → HA | no | current state JSON |
+| `state` | device → HA | yes | current state JSON |
 | `set` | HA → device | no | partial command JSON |
 
 Default topic prefix: `panaac_v2/esphome-panaac-v2`.
@@ -96,21 +96,31 @@ Partial JSON with any subset of the state keys:
 
 ## ClimateEntity features
 
-`PanaACV2Climate` reports:
+`PanaACV2Climate` is a pure push entity (`_attr_should_poll = False`): every
+state update arrives over MQTT, so Home Assistant does not schedule poll cycles.
+
+It reports:
 
 - `TARGET_TEMPERATURE`
-- `FAN_MODE`
-- `SWING_MODE`
+- `FAN_MODE` (only when `fan_modes` is non-empty)
+- `SWING_MODE` (only when `swing_modes` is non-empty)
 - `SWING_HORIZONTAL_MODE` (only when `swing_horizontal_modes` is non-empty)
+- `TURN_ON` / `TURN_OFF` (only when more than one HVAC mode is advertised and
+  `OFF` is among them)
 
-Feature flags are computed dynamically in `supported_features` so the horizontal
-swing dropdown only appears when the device advertises horizontal-swing support.
+Feature flags are computed dynamically in `supported_features` so each control
+only appears once the device advertises the corresponding capability. Until the
+first retained `traits` payload arrives the entity starts with conservative
+capabilities — only `OFF` as an HVAC mode and empty fan/swing mode lists — so a
+cold start or a lost retained-traits message cannot expose controls the device
+does not support. The full control set is applied when `_handle_traits` fills
+the mode lists.
 
 ## Config flow
 
-The integration has a single config flow step asking for `topic_prefix`.
-The topic prefix is used as the unique id, preventing duplicate entries for the
-same device.
+The integration has a single config flow step asking for a `device_name` and the
+`topic_prefix`. The topic prefix is used as the unique id, preventing duplicate
+entries for the same device.
 
 ## Availability
 

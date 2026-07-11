@@ -72,10 +72,19 @@ class PanaACV2Climate(ClimateEntity):
     """Representation of a PanaAC v2 climate device."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_hvac_modes = list(_DEFAULT_HVAC_MODES)
-    _attr_fan_modes = list(_DEFAULT_FAN_MODES)
-    _attr_swing_modes = list(_DEFAULT_SWING_MODES)
-    _attr_swing_horizontal_modes = list(_DEFAULT_SWING_HORIZONTAL_MODES)
+    # This integration is entirely MQTT push-driven: every state update arrives as a retained or
+    # live MQTT message on the state/availability topics, so polling would only schedule no-op
+    # update cycles. Opt out of polling explicitly (Codex review issue 1).
+    _attr_should_poll = False
+    # Conservative capability defaults until the first retained `traits` payload arrives
+    # (Codex review issue 2). We start with the minimal shape needed to render safely — only OFF,
+    # no fan/swing options and no horizontal swing — so a cold start or a lost retained-traits
+    # message cannot expose controls the actual device does not support. The full capability set
+    # is applied in `_handle_traits` once the device advertises it.
+    _attr_hvac_modes = [HVACMode.OFF]
+    _attr_fan_modes: list[str] = []
+    _attr_swing_modes: list[str] = []
+    _attr_swing_horizontal_modes: list[str] = []
     _attr_min_temp = 16
     _attr_max_temp = 30
     _attr_target_temperature_step = 0.5
@@ -111,12 +120,18 @@ class PanaACV2Climate(ClimateEntity):
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
-        """Return the list of supported features."""
-        features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
-            | ClimateEntityFeature.FAN_MODE
-            | ClimateEntityFeature.SWING_MODE
-        )
+        """Return the list of supported features.
+
+        Each fan/swing feature is gated on its mode list being populated, so before the first
+        retained `traits` payload arrives the entity only advertises TARGET_TEMPERATURE — the
+        conservative control surface from Codex review issue 2. The full feature set is exposed
+        once `_handle_traits` fills the mode lists.
+        """
+        features = ClimateEntityFeature.TARGET_TEMPERATURE
+        if self._attr_fan_modes:
+            features |= ClimateEntityFeature.FAN_MODE
+        if self._attr_swing_modes:
+            features |= ClimateEntityFeature.SWING_MODE
         if self._attr_swing_horizontal_modes:
             features |= ClimateEntityFeature.SWING_HORIZONTAL_MODE
         # Advertise turn on/off when the climate has more than one HVAC mode and
