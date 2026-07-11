@@ -12,6 +12,9 @@ The plan is split into two documents:
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
   commands (incl. bringing up HA and reading the recorder DB without the owner
   password), example automation YAML, and how to read results.
+- [`run_full_test.py`](run_full_test.py) — automation runner for the HA/MQTT
+  path plus ESPHome variant `config`/`compile` checks. It emits JSON and
+  Markdown reports under `test/results/`.
 
 ## Scope (three groups)
 
