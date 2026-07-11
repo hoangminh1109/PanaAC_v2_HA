@@ -19,7 +19,7 @@ The ESPHome device publishes:
 
 - `<topic_prefix>/availability` — `online` / `offline` (retained)
 - `<topic_prefix>/traits` — supported modes, ranges, temp step (retained)
-- `<topic_prefix>/state` — current mode, target temp, fan, swing, horizontal swing
+- `<topic_prefix>/state` — current mode, target temp, fan, swing, horizontal swing (retained)
 
 The integration subscribes to those topics and publishes commands to:
 
@@ -36,10 +36,10 @@ applies only the supplied fields.
 2. Open HACS and go to **Integrations**.
 3. Click the menu (⋮) and select **Custom repositories**.
 4. Add `https://github.com/hoangminh1109/PanaAC_v2_HA` with category **Integration**.
-5. Install **Panasonic AC v3 (MQTT)**.
+5. Install **PanaAC v2 (MQTT)**.
 6. Restart Home Assistant.
 7. Add the integration via **Settings → Devices & Services → Add Integration →
-   Panasonic AC v3 (MQTT)**.
+   PanaAC v2 (MQTT)**.
 8. Enter the MQTT topic prefix configured in the ESPHome YAML
    (`panaac_v2/esphome-panaac-v2` by default).
 
@@ -51,7 +51,7 @@ applies only the supplied fields.
    `config/custom_components/` directory.
 3. Restart Home Assistant.
 4. Add the integration via **Settings → Devices & Services → Add Integration →
-   Panasonic AC v3 (MQTT)**.
+   PanaAC v2 (MQTT)**.
 5. Enter the MQTT topic prefix configured in the ESPHome YAML
    (`panaac_v2/esphome-panaac-v2` by default).
 

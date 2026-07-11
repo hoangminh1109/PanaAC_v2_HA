@@ -29,7 +29,7 @@ Verify the broker is connected: the MQTT integration card should show
 2. Open HACS and go to **Integrations**.
 3. Click the menu (⋮) and select **Custom repositories**.
 4. Add `https://github.com/hoangminh1109/PanaAC_v2_HA` with category **Integration**.
-5. Install **Panasonic AC v3 (MQTT)**.
+5. Install **PanaAC v2 (MQTT)**.
 6. Restart Home Assistant.
 
 ### Method 2: Copy the folder
@@ -50,7 +50,7 @@ After copying, symlinking, or installing through HACS, **restart Home Assistant*
 ## Add the integration
 
 1. In Home Assistant go to **Settings → Devices & Services → Add Integration**.
-2. Search for **Panasonic AC v3 (MQTT)**.
+2. Search for **PanaAC v2 (MQTT)**.
 3. Enter the MQTT topic prefix configured in the ESPHome device YAML. The
    default is:
    ```
