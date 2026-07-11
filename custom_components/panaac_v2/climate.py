@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
+    HVACAction,
     HVACMode,
 )
 from homeassistant.components.mqtt.models import ReceiveMessage
@@ -112,6 +113,9 @@ class PanaACV2Climate(ClimateEntity):
         self._current_temperature: float | None = None
         self._target_temperature = 26.0
         self._hvac_mode = HVACMode.OFF
+        # Matches the placeholder hvac_mode above (OFF → OFF). Recomputed from the
+        # state payload in _handle_state; see _derive_hvac_action for the mapping.
+        self._attr_hvac_action: HVACAction | None = HVACAction.OFF
         self._fan_mode = "Auto"
         self._swing_mode = "Auto"
         self._swing_horizontal_mode = "Auto"
@@ -218,6 +222,9 @@ class PanaACV2Climate(ClimateEntity):
         self._swing_mode = payload.get("swing_mode", self._swing_mode)
         self._swing_horizontal_mode = payload.get("swing_horizontal_mode")
         self._current_temperature = payload.get("current_temperature")
+        self._attr_hvac_action = self._derive_hvac_action(
+            self._hvac_mode, self._current_temperature, self._target_temperature
+        )
         self.async_write_ha_state()
 
     @callback
@@ -308,3 +315,38 @@ class PanaACV2Climate(ClimateEntity):
             return HVACMode(value)
         except ValueError:
             return HVACMode.OFF
+
+    @staticmethod
+    def _derive_hvac_action(
+        hvac_mode: HVACMode,
+        current_temperature: float | None,
+        target_temperature: float | None,
+    ) -> HVACAction:
+        """Derive the current HVAC action from the commanded mode.
+
+        The PanaAC controller is a one-way IR transmitter: it knows the mode it
+        last commanded and the room/setpoint temperatures the unit reports, but
+        not whether the compressor is actually running. Map each mode to its
+        corresponding action so the climate building-block triggers and
+        conditions (``started_cooling``, ``is_heating``, …) fire. AUTO has no
+        single fixed action, so infer it from the room vs. setpoint temperature —
+        the same comparison the AC's own thermostat makes — and fall back to IDLE
+        when the temperatures are unknown or the room is at setpoint.
+        """
+        if hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
+        if hvac_mode == HVACMode.COOL:
+            return HVACAction.COOLING
+        if hvac_mode == HVACMode.HEAT:
+            return HVACAction.HEATING
+        if hvac_mode == HVACMode.DRY:
+            return HVACAction.DRYING
+        if hvac_mode == HVACMode.FAN_ONLY:
+            return HVACAction.FAN
+        # HVACMode.AUTO — infer from current vs. target temperature.
+        if current_temperature is not None and target_temperature is not None:
+            if current_temperature > target_temperature:
+                return HVACAction.COOLING
+            if current_temperature < target_temperature:
+                return HVACAction.HEATING
+        return HVACAction.IDLE
