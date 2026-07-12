@@ -156,7 +156,9 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.command == "menu":
         return run_menu(args)
 
-    args.suites = resolve_suite_selection(getattr(args, "suite_values", None))
+    suite_values = getattr(args, "suite_values", None)
+    if suite_values is not None:
+        args.suites = resolve_suite_selection(suite_values)
     runner = Runner(args)
     return runner.run()
 

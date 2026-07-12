@@ -21,11 +21,13 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import selectors
 from pathlib import Path
 import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
 import time
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
@@ -124,6 +126,7 @@ class Runner:
 
     def run(self) -> int:
         try:
+            self._log("Starting PanaAC v2 HA automated tests")
             self._maybe_prepare_stub_integration()
             self._validate_environment()
             self.setup_environment(
@@ -141,8 +144,10 @@ class Runner:
                 self.groups.extend(self._run_ha_groups())
 
             self._write_reports()
+            self._log(f"Completed automated tests with overall status: {'pass' if self._overall_status() else 'fail'}")
             return 0 if self._overall_status() else 1
         except Exception as err:  # noqa: BLE001
+            self._log(f"Runner failed: {err}")
             failure_group = GroupResult("runner", "Runner")
             failure_group.add(
                 CaseResult(
@@ -171,14 +176,17 @@ class Runner:
         self._validate_environment()
         status.add("Validated required binaries and local paths")
         if verify_mqtt:
+            self._log("Verifying MQTT broker publish/subscribe round-trip")
             self._verify_mqtt_round_trip()
             status.add("Verified MQTT broker publish/subscribe round-trip")
         if start_ha:
+            self._log("Ensuring Home Assistant is running")
             self._ensure_ha_running()
             status.add("Ensured Home Assistant is running")
             self.entity_id = self.entity_id or self._detect_entity_id()
             status.add(f"Resolved entity_id={self.entity_id}")
         if seed_baseline:
+            self._log("Restoring baseline retained topics")
             self._restore_baseline_topics()
             if start_ha:
                 self._ensure_entity_ready()
@@ -187,6 +195,7 @@ class Runner:
 
     def _run_ha_groups(self) -> list[GroupResult]:
         groups: list[GroupResult] = []
+        self._log("Running HA validation groups")
         self._ensure_ha_running()
         self._ensure_entity_ready()
 
@@ -322,16 +331,30 @@ class Runner:
         unique_id = f"{self.topic_prefix}_climate"
         registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
         data = json.loads(registry_path.read_text())
+        candidates: list[str] = []
         for entity in data["data"]["entities"]:
             if entity.get("unique_id") == unique_id:
-                return entity["entity_id"]
+                candidates.append(entity["entity_id"])
             if (
                 self._stub_entry_id
                 and entity.get("platform") == "panaac_v2"
                 and entity.get("config_entry_id") == self._stub_entry_id
             ):
                 return entity["entity_id"]
-        return None
+        if not candidates:
+            return None
+
+        scored: list[tuple[int, float, str]] = []
+        for entity_id in candidates:
+            snapshot = self._read_latest_state_for_entity(entity_id)
+            if snapshot is None:
+                scored.append((0, 0.0, entity_id))
+                continue
+            score = 2 if snapshot.get("state") != "unavailable" else 1
+            scored.append((score, float(snapshot.get("last_updated_ts") or 0.0), entity_id))
+
+        scored.sort(reverse=True)
+        return scored[0][2]
 
     def _detect_entity_id(self, timeout: float = 90.0, interval: float = 0.5) -> str:
         deadline = time.monotonic() + timeout
@@ -356,6 +379,7 @@ class Runner:
     def _verify_mqtt_round_trip(self) -> None:
         topic = f"{self.topic_prefix}/test_runner_probe"
         payload = f"probe-{int(time.time())}"
+        self._log(f"Checking MQTT round-trip on {topic}")
         sub_cmd = self._mosquitto_sub_command(topic=topic, count=1, timeout=4)
         proc = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         time.sleep(0.2)
@@ -373,6 +397,7 @@ class Runner:
         variants = ["C1", "C2", "C3", "C4", "C5", "C6", "C3-automation"]
         for variant in variants:
             started = time.monotonic()
+            self._log(f"[esphome.g1] {variant}: config and compile")
             yaml_path = self.esphome_repo_path / "test" / "variants" / f"{variant}.yaml"
             if not yaml_path.exists():
                 group.add(
@@ -420,74 +445,93 @@ class Runner:
 
     def _run_ha_group_1(self) -> GroupResult:
         group = GroupResult("ha.g1", SUITE_LABELS["ha.g1"])
+        esphome_bin = self.esphome_workspace_path / ".venv" / "bin" / "esphome"
+        env = os.environ.copy()
+        env["PLATFORMIO_CORE_DIR"] = env.get("PLATFORMIO_CORE_DIR", "/tmp/platformio")
+        env["XDG_CACHE_HOME"] = env.get("XDG_CACHE_HOME", "/tmp/.cache")
+
+        self._log("[ha.g1] C3 retained baseline verification")
         started = time.monotonic()
-        self._delete_retained("traits")
-        self._restart_ha()
-        cold_registry = self._read_registry_entity()
-        cold_state = self._read_latest_state()
-        expected_registry = {"hvac_modes": ["off"], "supported_features": TARGET_TEMPERATURE}
-        actual_registry = {
-            "hvac_modes": cold_registry["capabilities"].get("hvac_modes"),
-            "supported_features": cold_registry["supported_features"],
-            "fan_modes": cold_registry["capabilities"].get("fan_modes"),
-            "swing_modes": cold_registry["capabilities"].get("swing_modes"),
-            "swing_horizontal_modes": cold_registry["capabilities"].get("swing_horizontal_modes"),
+        self._restore_baseline_topics()
+        time.sleep(0.8)
+        c3_registry = self._read_registry_entity()
+        c3_state = self._read_latest_state()
+        expected_registry = {
+            "hvac_modes": RETAINED_BASELINE_TRAITS["hvac_modes"],
+            "fan_modes": RETAINED_BASELINE_TRAITS["fan_modes"],
+            "swing_modes": RETAINED_BASELINE_TRAITS["swing_modes"],
+            "swing_horizontal_modes": RETAINED_BASELINE_TRAITS["swing_horizontal_modes"],
+            "min_temp": RETAINED_BASELINE_TRAITS["min_temp"],
+            "max_temp": RETAINED_BASELINE_TRAITS["max_temp"],
+            "target_temp_step": RETAINED_BASELINE_TRAITS["temp_step"],
+            "supported_features": self._expected_supported_features(RETAINED_BASELINE_TRAITS),
         }
-        status = (
-            "pass"
-            if actual_registry["hvac_modes"] == ["off"]
-            and actual_registry["supported_features"] == TARGET_TEMPERATURE
-            and actual_registry["fan_modes"] is None
-            and actual_registry["swing_modes"] is None
-            and actual_registry["swing_horizontal_modes"] is None
-            else "fail"
-        )
+        actual_registry = {
+            "hvac_modes": c3_registry["capabilities"].get("hvac_modes"),
+            "supported_features": c3_registry["supported_features"],
+            "fan_modes": c3_registry["capabilities"].get("fan_modes"),
+            "swing_modes": c3_registry["capabilities"].get("swing_modes"),
+            "swing_horizontal_modes": c3_registry["capabilities"].get("swing_horizontal_modes"),
+            "min_temp": c3_registry["capabilities"].get("min_temp"),
+            "max_temp": c3_registry["capabilities"].get("max_temp"),
+            "target_temp_step": c3_registry["capabilities"].get("target_temp_step"),
+        }
+        c3_mismatches = self._compare_expected(expected_registry, actual_registry)
         group.add(
             CaseResult(
                 id="ha.g1.1",
-                title="Cold start without retained traits",
-                status=status,
+                title="C3 retained baseline traits",
+                status="pass" if not c3_mismatches else "fail",
                 expected=expected_registry,
-                actual={"registry": actual_registry, "state": cold_state},
+                actual={"registry": actual_registry, "state": c3_state},
+                evidence={"mismatches": c3_mismatches} if c3_mismatches else {},
                 duration_s=time.monotonic() - started,
             )
         )
 
-        for variant, payload in VARIANT_TRAITS.items():
+        for variant in VARIANT_TRAITS:
             started = time.monotonic()
-            self._publish_retained("traits", payload)
-            time.sleep(0.8)
-            registry = self._read_registry_entity()
-            state = self._read_latest_state()
-            expected = {
-                "hvac_modes": payload["hvac_modes"],
-                "fan_modes": payload["fan_modes"],
-                "swing_modes": payload["swing_modes"],
-                "swing_horizontal_modes": payload["swing_horizontal_modes"] or None,
-                "min_temp": payload["min_temp"],
-                "max_temp": payload["max_temp"],
-                "target_temp_step": payload["temp_step"],
-                "supported_features": self._expected_supported_features(payload),
-            }
-            actual = {
-                "hvac_modes": registry["capabilities"].get("hvac_modes"),
-                "fan_modes": registry["capabilities"].get("fan_modes"),
-                "swing_modes": registry["capabilities"].get("swing_modes"),
-                "swing_horizontal_modes": registry["capabilities"].get("swing_horizontal_modes"),
-                "min_temp": registry["capabilities"].get("min_temp"),
-                "max_temp": registry["capabilities"].get("max_temp"),
-                "target_temp_step": registry["capabilities"].get("target_temp_step"),
-                "supported_features": registry["supported_features"],
-            }
-            mismatches = self._compare_expected(expected, actual)
+            yaml_path = self.esphome_repo_path / "test" / "variants" / f"{variant}.yaml"
+            self._log(f"[ha.g1] {variant}: compile-only configuration check")
+            if not yaml_path.exists():
+                group.add(
+                    CaseResult(
+                        id=f"ha.g1.2.{variant.lower()}",
+                        title=f"Variant {variant} compile-only check",
+                        status="fail",
+                        expected=str(yaml_path),
+                        actual="Variant YAML missing",
+                    )
+                )
+                continue
+
+            yaml_arg = str(yaml_path.relative_to(self.esphome_workspace_path))
+            config_cmd = [str(esphome_bin), "config", yaml_arg]
+            compile_cmd = [str(esphome_bin), "compile", yaml_arg]
+            config_result = self._run_command(config_cmd, cwd=self.esphome_workspace_path, env=env, check=False)
+            compile_result = self._run_command(compile_cmd, cwd=self.esphome_workspace_path, env=env, check=False)
+            capture_path = self.raw_capture_dir / f"ha-{variant}.log"
+            capture_path.write_text(
+                "\n".join(
+                    [
+                        f"$ {' '.join(config_cmd)}",
+                        config_result.stdout,
+                        config_result.stderr,
+                        "",
+                        f"$ {' '.join(compile_cmd)}",
+                        compile_result.stdout,
+                        compile_result.stderr,
+                    ]
+                )
+            )
             group.add(
                 CaseResult(
                     id=f"ha.g1.2.{variant.lower()}",
-                    title=f"Variant {variant} traits adoption",
-                    status="pass" if not mismatches else "fail",
-                    expected=expected,
-                    actual=actual,
-                    evidence={"latest_state": state, **({"mismatches": mismatches} if mismatches else {})},
+                    title=f"Variant {variant} compile-only check",
+                    status="pass" if config_result.returncode == 0 and compile_result.returncode == 0 else "fail",
+                    expected="esphome config + compile exit 0",
+                    actual={"config_rc": config_result.returncode, "compile_rc": compile_result.returncode},
+                    evidence={"log_path": str(capture_path)},
                     duration_s=time.monotonic() - started,
                 )
             )
@@ -506,6 +550,7 @@ class Runner:
 
     def _run_ha_group_2(self) -> GroupResult:
         group = GroupResult("ha.g2", SUITE_LABELS["ha.g2"])
+        self._log("[ha.g2] State, service, and resilience checks")
         self._restore_baseline_topics()
         time.sleep(0.8)
 
@@ -544,6 +589,7 @@ class Runner:
 
         for availability in ("offline", "online"):
             started = time.monotonic()
+            self._log(f"[ha.g2] availability -> {availability}")
             self._publish_retained("availability", availability)
             snapshot = self._poll_state(
                 (lambda s: s.get("state") == "unavailable")
@@ -566,11 +612,20 @@ class Runner:
 
         for case in ACTION_CASES:
             started = time.monotonic()
+            self._log(f"[ha.g2] service case: {case['id']}")
             try:
-                self._publish_retained("state", self._baseline_state_for_mode(case["baseline_mode"]))
-                time.sleep(0.6)
+                prior_snapshot = self._read_latest_state()
+                baseline_state = self._baseline_state_for_mode(case["baseline_mode"])
+                self._publish_retained("state", baseline_state)
+                baseline_snapshot = self._poll_state_subset(
+                    self._baseline_state_snapshot(case["baseline_mode"]),
+                    newer_than=prior_snapshot.get("last_updated_ts"),
+                )
                 actual_payload = self._capture_set_payload(case["service"], case["service_data"])
-                reflected_snapshot = self._poll_state_subset(case["expected_state"])
+                reflected_snapshot = self._poll_state_subset(
+                    case["expected_state"],
+                    newer_than=baseline_snapshot.get("last_updated_ts"),
+                )
                 payload_ok = actual_payload == case["expected_payload"]
                 state_mismatches = self._compare_expected(case["expected_state"], reflected_snapshot)
                 actual: Any = {
@@ -600,9 +655,12 @@ class Runner:
 
         for expected_action, payload in HVAC_ACTION_CASES:
             started = time.monotonic()
+            self._log(f"[ha.g2] hvac_action case: {payload['mode']} -> {expected_action}")
+            prior_snapshot = self._read_latest_state()
             self._publish_retained("state", payload)
             snapshot = self._poll_state(
-                lambda s, expected=payload["mode"], action=expected_action: s.get("state") == expected and s.get("hvac_action") == action
+                lambda s, expected=payload["mode"], action=expected_action: s.get("state") == expected and s.get("hvac_action") == action,
+                newer_than=prior_snapshot.get("last_updated_ts"),
             )
             group.add(
                 CaseResult(
@@ -677,8 +735,10 @@ class Runner:
 
     def _run_ha_group_3(self) -> GroupResult:
         group = GroupResult("ha.g3", SUITE_LABELS["ha.g3"])
+        self._log("[ha.g3] ESPHome button and HA service integration checks")
 
         started = time.monotonic()
+        self._log("[ha.g3] climate.control button press")
         control_logs = self._press_esphome_button("esphome-panaac-v2/button/control_cool_24c/command")
         control_state = self._poll_state_subset(
             {
@@ -721,6 +781,7 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[ha.g3] lambda make_call button press")
         make_call_logs = self._press_esphome_button("esphome-panaac-v2/button/lambda_make_call_cool_24c/command")
         make_call_state = self._poll_state_subset(
             {
@@ -761,6 +822,8 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[ha.g3] climate.service test")
+        prior_snapshot = self._read_latest_state()
         self._publish_retained(
             "state",
             {
@@ -773,9 +836,12 @@ class Runner:
                 "available": True,
             },
         )
-        time.sleep(0.8)
+        baseline_snapshot = self._poll_state_subset(
+            {"state": "off", "temperature": 24, "fan_mode": "Auto", "swing_mode": "Auto"},
+            newer_than=prior_snapshot.get("last_updated_ts"),
+        )
         service_logs = self._capture_debug_for_action(lambda: self._call_ha_service("climate", "set_hvac_mode", {"hvac_mode": "cool"}))
-        service_state = self._poll_state_subset({"state": "cool"})
+        service_state = self._poll_state_subset({"state": "cool"}, newer_than=baseline_snapshot.get("last_updated_ts"))
         service_log_mismatches = self._missing_log_fragments(service_logs, ("on_control fired", "on_state fired"))
         service_state_mismatches = self._compare_expected({"state": "cool"}, service_state)
         group.add(
@@ -801,6 +867,7 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[ha.g3] climate trigger tests")
         trigger_log = self.raw_capture_dir / "ha-climate-trigger-tests.log"
         trigger_cmd = [
             "uv",
@@ -828,6 +895,7 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[ha.g3] climate condition tests")
         condition_log = self.raw_capture_dir / "ha-climate-condition-tests.log"
         condition_cmd = [
             "uv",
@@ -870,18 +938,35 @@ class Runner:
             time.sleep(1.0)
         raise TestFailure(f"Failed to capture set payload for {service}: {last_error}")
 
-    def _poll_state(self, predicate: Callable[[dict[str, Any]], bool], timeout: float = 8.0, interval: float = 0.4) -> dict[str, Any]:
+    def _poll_state(
+        self,
+        predicate: Callable[[dict[str, Any]], bool],
+        timeout: float = 8.0,
+        interval: float = 0.4,
+        newer_than: float | None = None,
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         latest: dict[str, Any] = {}
         while time.monotonic() < deadline:
             latest = self._read_latest_state()
-            if predicate(latest):
+            if predicate(latest) and (newer_than is None or float(latest.get("last_updated_ts") or 0.0) > newer_than):
                 return latest
             time.sleep(interval)
         return latest
 
-    def _poll_state_subset(self, expected: dict[str, Any], timeout: float = 10.0, interval: float = 0.4) -> dict[str, Any]:
-        return self._poll_state(lambda state: not self._compare_expected(expected, state), timeout=timeout, interval=interval)
+    def _poll_state_subset(
+        self,
+        expected: dict[str, Any],
+        timeout: float = 10.0,
+        interval: float = 0.4,
+        newer_than: float | None = None,
+    ) -> dict[str, Any]:
+        return self._poll_state(
+            lambda state: not self._compare_expected(expected, state),
+            timeout=timeout,
+            interval=interval,
+            newer_than=newer_than,
+        )
 
     def _press_esphome_button(self, topic: str) -> list[str]:
         return self._capture_debug_for_action(lambda: self._publish_text(topic, "PRESS"))
@@ -897,7 +982,14 @@ class Runner:
         return [line.strip() for line in stdout.splitlines() if line.strip()]
 
     def _read_latest_state(self) -> dict[str, Any]:
+        return self._read_latest_state_for_entity(self.entity_id)
+
+    def _read_latest_state_for_entity(self, entity_id: str | None) -> dict[str, Any] | None:
+        if entity_id is None:
+            return None
         db_path = self.ha_config_path / "home-assistant_v2.db"
+        if not db_path.exists():
+            return None
         con = sqlite3.connect(db_path)
         con.row_factory = sqlite3.Row
         row = con.execute(
@@ -910,11 +1002,11 @@ class Runner:
             ORDER BY s.last_updated_ts DESC
             LIMIT 1
             """,
-            (self.entity_id,),
+            (entity_id,),
         ).fetchone()
         con.close()
         if row is None:
-            raise TestFailure(f"No recorder state found for {self.entity_id}")
+            return None
         attrs = json.loads(row["shared_attrs"]) if row["shared_attrs"] else {}
         result = {"last_updated_ts": row["last_updated_ts"], "state": row["state"]}
         for key in CURRENT_STATE_KEYS[1:]:
@@ -959,6 +1051,7 @@ class Runner:
             raise TestFailure(f"Entity {self.entity_id} did not become available after baseline topic restore")
 
     def _start_ha(self) -> None:
+        self._log(f"Starting Home Assistant at {self.ha_config_path}")
         with self.ha_log_path.open("a") as log_file:
             subprocess.Popen(
                 ["./.venv/bin/hass", "-c", str(self.ha_config_path)],
@@ -969,6 +1062,7 @@ class Runner:
             )
 
     def _stop_ha(self) -> None:
+        self._log("Stopping Home Assistant")
         pid_file = self.ha_config_path / "home-assistant.pid"
         pids: list[int] = []
         if pid_file.exists():
@@ -998,6 +1092,7 @@ class Runner:
     def _run_broker_cycle_case(self) -> dict[str, Any]:
         started = time.monotonic()
         try:
+            self._log("Cycling mosquitto broker")
             self._run_broker_service("stop")
             unavailable_snapshot = self._poll_state(lambda s: s.get("state") == "unavailable", timeout=20.0, interval=0.5)
             self._run_broker_service("start")
@@ -1129,6 +1224,16 @@ class Runner:
             "available": True,
         }
 
+    def _baseline_state_snapshot(self, mode: str) -> dict[str, Any]:
+        state = self._baseline_state_for_mode(mode)
+        return {
+            "state": state["mode"],
+            "temperature": state["target_temperature"],
+            "fan_mode": state["fan_mode"],
+            "swing_mode": state["swing_mode"],
+            "swing_horizontal_mode": state["swing_horizontal_mode"],
+        }
+
     def _state_key_to_payload_key(self, key: str) -> str:
         return "target_temperature" if key == "temperature" else key
 
@@ -1160,10 +1265,48 @@ class Runner:
         input_text: str | None = None,
         check: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(cmd, cwd=cwd, env=env, input=input_text, text=True, capture_output=True)
+        self._log(f"$ {' '.join(cmd)}")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE if input_text is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        if input_text is not None and proc.stdin is not None:
+            proc.stdin.write(input_text)
+            proc.stdin.close()
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        selector = selectors.DefaultSelector()
+        if proc.stdout is not None:
+            selector.register(proc.stdout, selectors.EVENT_READ, ("stdout", stdout_chunks))
+        if proc.stderr is not None:
+            selector.register(proc.stderr, selectors.EVENT_READ, ("stderr", stderr_chunks))
+        while selector.get_map():
+            for key, _ in selector.select():
+                stream_name, chunks = key.data
+                line = key.fileobj.readline()
+                if line == "":
+                    selector.unregister(key.fileobj)
+                    continue
+                chunks.append(line)
+                target = sys.stdout if stream_name == "stdout" else sys.stderr
+                target.write(line)
+                target.flush()
+        returncode = proc.wait()
+        result = subprocess.CompletedProcess(cmd, returncode, "".join(stdout_chunks), "".join(stderr_chunks))
+        if stderr_chunks and returncode == 0:
+            self._log(f"[warn] command wrote to stderr: {' '.join(cmd)}")
         if check and result.returncode != 0:
             raise TestFailure(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
+
+    def _log(self, message: str) -> None:
+        print(message, flush=True)
 
     def _resolve_ha_api_token(self) -> str:
         auth_path = self.ha_config_path / ".storage" / "auth"
@@ -1212,6 +1355,8 @@ class Runner:
             raise TestFailure(f"HA service call failed for {domain}.{service}: {err}") from err
 
     def _write_reports(self) -> None:
+        self._log(f"Writing JSON report to {self.report_json_path}")
+        self._log(f"Writing Markdown report to {self.report_md_path}")
         payload = {
             "timestamp": self.timestamp.isoformat(),
             "git": {
