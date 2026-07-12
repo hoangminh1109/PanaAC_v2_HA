@@ -77,10 +77,13 @@ class Runner:
         self.args = args
         self.repo_root = Path(__file__).resolve().parents[2]
         self.ha_core_path = Path(args.ha_core_path).resolve()
+        self.ha_config_path = self.ha_core_path / "config"
         self.esphome_repo_path = Path(args.esphome_repo_path).resolve()
         self.esphome_workspace_path = self._resolve_esphome_workspace_path()
         self.output_dir = Path(args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.ha_port = 8123
+        self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
         self.mqtt_host = args.mqtt_host
         self.mqtt_port = args.mqtt_port
         self.mqtt_user = args.mqtt_user
@@ -94,22 +97,28 @@ class Runner:
         self.ha_log_path = self.output_dir / "ha.log"
         self.raw_capture_dir = self.output_dir / "captures"
         self.raw_capture_dir.mkdir(parents=True, exist_ok=True)
-        self.automations_path = self.ha_core_path / "config" / "automations.yaml"
+        self.automations_path = self.ha_config_path / "automations.yaml"
         self.original_automations = self.automations_path.read_text() if self.automations_path.exists() else "[]\n"
         self.entity_id = args.entity_id
         self.ha_api_token: str | None = None
         self.groups: list[GroupResult] = []
         self._cleanup_callbacks: list[tuple[str, Callable[[], None]]] = []
+        self._stub_storage_backup: dict[str, str] | None = None
+        self._stubbed_integration = False
+        self._stub_entry_id: str | None = None
+        self._stub_ha_bootstrapped = False
 
     def run(self) -> int:
         try:
+            self._maybe_prepare_stub_integration()
             self._validate_environment()
-            self.entity_id = self.entity_id or self._detect_entity_id()
             self.setup_environment(
                 start_ha=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
                 seed_baseline=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
                 verify_mqtt=True,
             )
+            if self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}:
+                self.entity_id = self.entity_id or self._detect_entity_id()
 
             if "esphome.g1" in self.selected_suites:
                 self.groups.append(self._run_esphome_group())
@@ -186,14 +195,138 @@ class Runner:
         if not self.automations_path.exists():
             raise TestFailure(f"Missing automations file at {self.automations_path}")
 
-    def _detect_entity_id(self) -> str:
+    def _maybe_prepare_stub_integration(self) -> None:
+        if "ha.g2" not in self.selected_suites or "ha.g3" in self.selected_suites or self._stubbed_integration:
+            return
+        stub_config_path = self.output_dir / "ha_stub_config"
+        if stub_config_path.exists():
+            shutil.rmtree(stub_config_path)
+        shutil.copytree(self.ha_config_path, stub_config_path)
+        self.ha_config_path = stub_config_path
+        self.ha_port = 8124
+        self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
+        self.automations_path = self.ha_config_path / "automations.yaml"
+        http_storage_path = self.ha_config_path / ".storage" / "http"
+        http_storage = json.loads(http_storage_path.read_text())
+        http_storage["data"]["stable"]["server_port"] = self.ha_port
+        if http_storage["data"].get("pending") is not None:
+            http_storage["data"]["pending"]["server_port"] = self.ha_port
+        http_storage_path.write_text(json.dumps(http_storage, indent=2) + "\n")
+        for db_name in ("home-assistant_v2.db", "home-assistant_v2.db-shm", "home-assistant_v2.db-wal"):
+            db_path = self.ha_config_path / db_name
+            if db_path.exists():
+                db_path.unlink()
+        storage_dir = self.ha_config_path / ".storage"
+        files = {
+            "config_entries": storage_dir / "core.config_entries",
+            "entity_registry": storage_dir / "core.entity_registry",
+            "device_registry": storage_dir / "core.device_registry",
+        }
+        stub_prefix = f"{self.topic_prefix}-stub"
+        stub_name = "PanaAC_AutoStub"
+        stub_entity_id = self._stub_entity_id(stub_name)
+        now = datetime.now().astimezone().isoformat()
+
+        config_entries = json.loads(files["config_entries"].read_text())
+        target_entry: dict[str, Any] | None = None
+        for entry in config_entries["data"]["entries"]:
+            if entry.get("domain") == "panaac_v2":
+                target_entry = entry
+                break
+        if target_entry is None:
+            raise TestFailure("Could not find panaac_v2 config entry for stub setup")
+        target_entry["data"]["topic_prefix"] = stub_prefix
+        target_entry["data"]["device_name"] = stub_name
+        target_entry["title"] = f"{stub_name} ({stub_prefix})"
+        target_entry["unique_id"] = stub_prefix
+        target_entry["modified_at"] = now
+        files["config_entries"].write_text(json.dumps(config_entries, indent=2) + "\n")
+
+        entity_registry = json.loads(files["entity_registry"].read_text())
+        entity_registry["data"]["entities"] = [
+            entity
+            for entity in entity_registry["data"]["entities"]
+            if not (
+                entity.get("platform") == "panaac_v2"
+                or entity.get("config_entry_id") == target_entry["entry_id"]
+            )
+        ]
+        files["entity_registry"].write_text(json.dumps(entity_registry, indent=2) + "\n")
+
+        device_registry = json.loads(files["device_registry"].read_text())
+        device_registry["data"]["devices"] = [
+            device
+            for device in device_registry["data"]["devices"]
+            if target_entry["entry_id"] not in device.get("config_entries", [])
+        ]
+        files["device_registry"].write_text(json.dumps(device_registry, indent=2) + "\n")
+
+        def restore_storage() -> None:
+            self._stop_ha()
+            self.topic_prefix = self.args.topic_prefix
+            self.ha_config_path = self.ha_core_path / "config"
+            self.ha_port = 8123
+            self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
+            self.automations_path = self.ha_config_path / "automations.yaml"
+            self.entity_id = self.args.entity_id
+            self._stubbed_integration = False
+            self._stub_entry_id = None
+            self._stub_ha_bootstrapped = False
+            shutil.rmtree(stub_config_path, ignore_errors=True)
+
+        self._cleanup_callbacks.append(("restore_stub_storage", restore_storage))
+        self._stop_ha()
+        self.topic_prefix = stub_prefix
+        self.entity_id = stub_entity_id
+        self._stubbed_integration = True
+        self._stub_entry_id = target_entry["entry_id"]
+        self._stub_ha_bootstrapped = False
+
+    def _stub_entity_id(self, stub_name: str) -> str:
+        slug = "".join(char.lower() if char.isalnum() else "_" for char in stub_name)
+        while "__" in slug:
+            slug = slug.replace("__", "_")
+        return f"climate.{slug.strip('_')}_remote_controller_v2"
+
+    def _entity_present(self, entity_id: str | None = None) -> bool:
+        target = entity_id or self.entity_id
+        if target is None:
+            return False
+        registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
+        data = json.loads(registry_path.read_text())
+        return any(entity.get("entity_id") == target for entity in data["data"]["entities"])
+
+    def _wait_for_entity_registration(self, timeout: float = 45.0, interval: float = 0.5) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._entity_present():
+                return
+            time.sleep(interval)
+        raise TestFailure(f"Entity {self.entity_id} did not appear in entity registry before timeout")
+
+    def _find_entity_id(self) -> str | None:
         unique_id = f"{self.topic_prefix}_climate"
-        registry_path = self.ha_core_path / "config" / ".storage" / "core.entity_registry"
+        registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
         data = json.loads(registry_path.read_text())
         for entity in data["data"]["entities"]:
             if entity.get("unique_id") == unique_id:
                 return entity["entity_id"]
-        raise TestFailure(f"Could not auto-detect entity_id for unique_id {unique_id}")
+            if (
+                self._stub_entry_id
+                and entity.get("platform") == "panaac_v2"
+                and entity.get("config_entry_id") == self._stub_entry_id
+            ):
+                return entity["entity_id"]
+        return None
+
+    def _detect_entity_id(self, timeout: float = 90.0, interval: float = 0.5) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            entity_id = self._find_entity_id()
+            if entity_id is not None:
+                return entity_id
+            time.sleep(interval)
+        raise TestFailure(f"Could not auto-detect entity_id for unique_id {self.topic_prefix}_climate")
 
     def _resolve_esphome_workspace_path(self) -> Path:
         candidates = [
@@ -750,7 +883,7 @@ class Runner:
         return [line.strip() for line in stdout.splitlines() if line.strip()]
 
     def _read_latest_state(self) -> dict[str, Any]:
-        db_path = self.ha_core_path / "config" / "home-assistant_v2.db"
+        db_path = self.ha_config_path / "home-assistant_v2.db"
         con = sqlite3.connect(db_path)
         con.row_factory = sqlite3.Row
         row = con.execute(
@@ -775,7 +908,7 @@ class Runner:
         return result
 
     def _read_registry_entity(self) -> dict[str, Any]:
-        registry_path = self.ha_core_path / "config" / ".storage" / "core.entity_registry"
+        registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
         data = json.loads(registry_path.read_text())
         for entity in data["data"]["entities"]:
             if entity["entity_id"] == self.entity_id:
@@ -789,6 +922,17 @@ class Runner:
         time.sleep(1.0)
 
     def _ensure_ha_running(self) -> None:
+        if self._stubbed_integration:
+            if self._stub_ha_bootstrapped and self._http_ready() and self._entity_present():
+                return
+            if self._http_ready():
+                self._restart_ha()
+            else:
+                self._start_ha()
+                self._wait_for_ha()
+            self._wait_for_entity_registration(timeout=45.0, interval=0.5)
+            self._stub_ha_bootstrapped = True
+            return
         if self._http_ready():
             return
         self._start_ha()
@@ -803,7 +947,7 @@ class Runner:
     def _start_ha(self) -> None:
         with self.ha_log_path.open("a") as log_file:
             subprocess.Popen(
-                ["./.venv/bin/hass", "-c", "config"],
+                ["./.venv/bin/hass", "-c", str(self.ha_config_path)],
                 cwd=self.ha_core_path,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -811,14 +955,14 @@ class Runner:
             )
 
     def _stop_ha(self) -> None:
-        pid_file = self.ha_core_path / "config" / "home-assistant.pid"
+        pid_file = self.ha_config_path / "home-assistant.pid"
         pids: list[int] = []
         if pid_file.exists():
             content = pid_file.read_text().strip()
             if content.isdigit():
                 pids.append(int(content))
         if not pids:
-            result = self._run_command(["pgrep", "-f", "hass -c config"], check=False)
+            result = self._run_command(["pgrep", "-f", f"hass -c {self.ha_config_path}"], check=False)
             for line in result.stdout.splitlines():
                 if line.strip().isdigit():
                     pids.append(int(line.strip()))
@@ -882,7 +1026,7 @@ class Runner:
 
     def _http_ready(self) -> bool:
         try:
-            with urlopen("http://127.0.0.1:8123", timeout=3) as response:
+            with urlopen(self.ha_base_url, timeout=3) as response:
                 return response.status in (200, 401, 405)
         except URLError:
             return False
@@ -1008,7 +1152,7 @@ class Runner:
         return result
 
     def _resolve_ha_api_token(self) -> str:
-        auth_path = self.ha_core_path / "config" / ".storage" / "auth"
+        auth_path = self.ha_config_path / ".storage" / "auth"
         data = json.loads(auth_path.read_text())
         tokens = data["data"].get("refresh_tokens", [])
         for token in sorted(tokens, key=lambda item: item.get("created_at", ""), reverse=True):
@@ -1023,7 +1167,7 @@ class Runner:
         if client_id:
             body["client_id"] = client_id
         request = Request(
-            "http://127.0.0.1:8123/auth/token",
+            f"{self.ha_base_url}/auth/token",
             data=urlencode(body).encode(),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
@@ -1040,7 +1184,7 @@ class Runner:
         if self.ha_api_token is None:
             self.ha_api_token = self._resolve_ha_api_token()
         request = Request(
-            f"http://127.0.0.1:8123/api/services/{domain}/{service}",
+            f"{self.ha_base_url}/api/services/{domain}/{service}",
             data=json.dumps({"entity_id": self.entity_id, **data}).encode(),
             headers={"Authorization": f"Bearer {self.ha_api_token}", "Content-Type": "application/json"},
             method="POST",
