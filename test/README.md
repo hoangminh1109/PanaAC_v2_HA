@@ -12,9 +12,14 @@ The plan is split into two documents:
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
   commands (incl. bringing up HA and reading the recorder DB without the owner
   password), example automation YAML, and how to read results.
-- [`run_full_test.py`](run_full_test.py) — automation runner for the HA/MQTT
-  path plus ESPHome variant `config`/`compile` checks. It emits JSON and
-  Markdown reports under `test/results/`.
+- [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
+  runner.
+- [`automation_runner/data.py`](automation_runner/data.py) — static test data
+  and suite definitions.
+- [`automation_runner/core.py`](automation_runner/core.py) — test framework,
+  environment management, report generation, and suite execution.
+- [`automation_runner/cli.py`](automation_runner/cli.py) — CLI and interactive
+  menu for selecting suites and preparing the environment.
 
 ## Scope (three groups)
 
@@ -42,3 +47,10 @@ The plan is split into two documents:
 
 Not yet executed. After execution, record results inline in
 `test-execution.md` and commit to this branch.
+
+## Runner usage
+
+- `python3 test/run_full_test.py list`
+- `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py run --suite esphome.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py menu`
