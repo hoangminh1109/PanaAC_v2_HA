@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 from .core import Runner, TestFailure, resolve_suite_selection
@@ -48,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--no-seed-baseline", action="store_true", help="Skip publishing baseline retained topics")
     setup_parser.add_argument("--no-verify-mqtt", action="store_true", help="Skip MQTT broker round-trip validation")
 
+    stubbed_parser = subparsers.add_parser("stubbed", help="Run the stubbed HA pytest suite")
+    stubbed_parser.add_argument("--ha-core-path", default=str(workspace_root / "ha" / "core"))
+    stubbed_parser.add_argument("--group", choices=("all", "subscriptions", "state", "commands"), default="all")
+
     subparsers.add_parser("list", help="List available suites")
 
     menu_parser = subparsers.add_parser("menu", help="Interactive menu")
@@ -59,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
 def normalize_argv(argv: list[str]) -> list[str]:
     if not argv:
         return ["run"]
-    if argv[0] in {"run", "setup-env", "list", "menu"}:
+    if argv[0] in {"run", "setup-env", "stubbed", "list", "menu"}:
         return argv
     return ["run", *argv]
 
@@ -125,6 +131,13 @@ def dispatch(args: argparse.Namespace) -> int:
         for check in status.checks:
             print(f"- {check}")
         return 0
+
+    if args.command == "stubbed":
+        repo_root = Path(__file__).resolve().parents[2]
+        cmd = [sys.executable, str(repo_root / "test" / "run_stubbed_pytest.py"), "--ha-core-path", args.ha_core_path, "--group", args.group]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root)
+        return subprocess.run(cmd, env=env, check=False).returncode
 
     if args.command == "menu":
         return run_menu(args)

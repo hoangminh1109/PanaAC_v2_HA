@@ -60,6 +60,7 @@ Not yet executed. After execution, record results inline in
 - `python3 test/run_full_test.py list`
 - `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
 - `python3 test/run_full_test.py run --suite esphome.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py stubbed --group all`
 - `python3 test/run_full_test.py menu`
 - `python3 test/run_stubbed_pytest.py --group all`
 - `python3 test/run_stubbed_pytest.py --group state`
