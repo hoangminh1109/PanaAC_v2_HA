@@ -21,8 +21,9 @@ The plan is split into two documents:
 - [`test-specification.md`](test-specification.md) — **what** to test: the
   groups, inputs, expected behaviour, pass/fail criteria.
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
-  commands (incl. bringing up HA and reading the recorder DB without the owner
-  password), example automation YAML, and how to read results.
+  commands (incl. a from-scratch developer environment setup, bringing up HA,
+  and reading the recorder DB without the owner password), example automation
+  YAML, and how to read results.
 - [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
   runner.
 - [`run_stubbed_pytest.py`](run_stubbed_pytest.py) — offline/stubbed pytest

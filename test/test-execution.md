@@ -49,6 +49,80 @@ If you want the lower-level stubbed entrypoint directly:
 python3 test/run_stubbed_pytest.py --group all
 ```
 
+## Environment setup from scratch
+
+These steps assume a new developer is starting with an empty `HA/` workspace
+and wants a reproducible local test environment.
+
+1. Create the workspace layout and clone the required repos:
+
+   ```bash
+   mkdir -p HA/ha HA/esphome
+   cd HA/ha
+   git clone https://github.com/home-assistant/core.git
+   git clone <PanaAC_v2_HA remote> PanaAC_v2_HA
+   cd ../esphome
+   git clone <PanaAC_v2_ESPHome remote> PanaAC_v2_ESPHome
+   ```
+
+2. Prepare the Home Assistant core dev environment:
+
+   ```bash
+   cd HA/ha/core
+   script/setup
+   ```
+
+   This creates `HA/ha/core/.venv`, installs Python dependencies, and prepares
+   the standard HA development environment.
+
+3. Install and start a local MQTT broker. On Debian/Ubuntu:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y mosquitto mosquitto-clients
+   sudo systemctl enable --now mosquitto
+   ```
+
+   Configure credentials that match the test docs, or adjust the runner
+   commands consistently. The examples below assume `mqtt_user` /
+   `mqtt_pass`.
+
+4. Link the custom integration into the HA config dir:
+
+   ```bash
+   cd HA/ha/core
+   mkdir -p config/custom_components
+   ln -s ../../../PanaAC_v2_HA/custom_components/panaac_v2 \
+     config/custom_components/panaac_v2
+   ```
+
+5. Start HA once so the config dir and database are created:
+
+   ```bash
+   cd HA/ha/core
+   .venv/bin/hass -c config
+   ```
+
+   Stop it after the initial startup finishes.
+
+6. In the HA UI, add:
+
+   - the MQTT integration, pointed at `127.0.0.1:1883`
+   - a `panaac_v2` config entry named `test ac`
+   - topic prefix `panaac_v2/esphome-panaac-v2`
+
+7. Keep HA running for the HIL suites:
+
+   ```bash
+   cd HA/ha/core
+   nohup ./.venv/bin/hass -c config > /tmp/ha_core_run.log 2>&1 &
+   ```
+
+8. Set up the ESPHome side and flash the DUT by following
+   `HA/esphome/PanaAC_v2_ESPHome/test/test-execution.md`. The HA tests require
+   the device to be online and publishing retained `availability`, `traits`,
+   and `state`.
+
 ## Prerequisites
 
 - HA core dev instance ≥ 2026.7 running at `http://localhost:8123`, from
