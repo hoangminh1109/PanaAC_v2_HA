@@ -1,7 +1,36 @@
 # PanaAC v2 HA — test execution instructions
 
-How to run the tests in `test-specification.md`. Record each step's outcome on
-its `Result:` line and commit this file to the `testing/full-test` branch.
+How to run the tests in `test-specification.md`. The HA coverage is now split
+into two layers:
+
+- `stubbed` automation for HA-side climate entity behavior, with no DUT needed
+- HIL automation for MQTT, HA runtime, and DUT-facing checks
+
+Record each step's outcome on its `Result:` line and commit this file to the
+`testing/full-test` branch.
+
+## Recommended order
+
+1. Run the stubbed pytest layer first.
+2. Run the HIL environment setup.
+3. Run the targeted HIL suites.
+4. Record the result in a timestamped `test-execution-<date-time>.md`.
+
+## Fast path
+
+From `ha/PanaAC_v2_HA`:
+
+```bash
+python3 test/run_full_test.py stubbed --group all
+python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g1 --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+If you want the lower-level stubbed entrypoint directly:
+
+```bash
+python3 test/run_stubbed_pytest.py --group all
+```
 
 ## Prerequisites
 
@@ -28,6 +57,41 @@ its `Result:` line and commit this file to the `testing/full-test` branch.
 - mosquitto CLI for driving/observing: `mosquitto_pub`/`mosquitto_sub`.
 
 Commands run from `ha/core` unless noted.
+
+## Automated runner entrypoints
+
+From `ha/PanaAC_v2_HA`:
+
+```bash
+python3 test/run_full_test.py list
+python3 test/run_full_test.py menu
+python3 test/run_full_test.py stubbed --group all
+python3 test/run_full_test.py stubbed --group state
+python3 test/run_full_test.py stubbed --group commands
+python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+Interpretation:
+
+- `stubbed` covers HA-side subscriptions, state/traits ingestion, command
+  publishing, derived `hvac_action`, invalid payload handling, and turn on/off
+  behavior without the DUT.
+- `ha.g1` and `ha.g3` are HIL-oriented and use the live HA core config.
+- `ha.g2` is the most runtime-sensitive suite. The runner uses an isolated copy
+  of the HA config for this path so it does not mutate the live `ha/core/config`
+  instance.
+
+## Current automation status
+
+- `stubbed` pytest path: working and recommended as the first gate
+- `ha.g1`: automated
+- `ha.g3`: automated
+- `ha.g2`: automated runner exists, but if it fails during bootstrap, keep the
+  generated `report.md`, `report.json`, and `ha.log` under the output dir and
+  record the failure as a runner issue rather than a product regression
 
 ## Reading the entity state without the owner password
 
@@ -57,6 +121,12 @@ the state, wait ~2–3 s, then run the snippet.
 
 ## Group 1 — Traits consistency
 
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite ha.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
 ### 1.1 Before first traits
 Delete retained `traits` and restart HA so the entity starts cold:
 ```
@@ -75,6 +145,19 @@ and the `supported_features`-derived presence of fan/swing/turn_on-off.
 Result C1: … C2: … C3: … C4: … C5: … C6: …
 
 ## Group 2 — Two-way MQTT with the ESPHome side
+
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+For broker lifecycle coverage:
+
+```bash
+BROKER_SUDO_PASSWORD='mnhmnh' \
+python3 test/run_full_test.py run --suite ha.g2 --mode full-hil --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 Observe the DUT topics in one terminal:
 ```
@@ -116,6 +199,12 @@ retained `traits` and restart HA; confirm the conservative defaults (§1.1)
 then recovery when the device republishes. Result: …
 
 ## Group 3 — Automation
+
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 Create a temporary test automation file at
 `ha/core/config/automations.yaml` (back up the existing `[]` first), then
@@ -182,5 +271,9 @@ the ESPHome test YAML. Result: …
 - Restore `ha/core/config/automations.yaml` to `[]` and restart HA to leave the
   instance clean. Remove any retained `panaac_v2/test/*` messages:
   `mosquitto_pub ... -t panaac_v2/test/started_cooling -n -r` (etc.).
+- Recommended artifacts to keep for each automated run:
+  - output dir `report.md`
+  - output dir `report.json`
+  - output dir `ha.log`
 - Record every `Result:` line. Commit to the `testing/full-test` branch. Do not
   push unless asked.
