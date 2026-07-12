@@ -116,6 +116,38 @@ cold start or a lost retained-traits message cannot expose controls the device
 does not support. The full control set is applied when `_handle_traits` fills
 the mode lists.
 
+## `hvac_action` (derived)
+
+The entity exposes `hvac_action` so the climate building-block automation
+surface works: the `started_cooling` / `started_drying` / `started_heating`
+triggers and the `is_cooling` / `is_drying` / `is_heating` conditions all read
+this attribute (see HA core `components/climate/trigger.py` and
+`condition.py`).
+
+The PanaAC controller is a **one-way IR transmitter**: it knows the mode it last
+commanded (and the room/setpoint temperatures the unit reports) but not whether
+the compressor is actually running. So `hvac_action` is *derived* on the Home
+Assistant side in `_derive_hvac_action`, not reported verbatim by the device:
+
+| Commanded mode | `hvac_action` |
+|----------------|---------------|
+| `off`          | `off`         |
+| `cool`         | `cooling`     |
+| `heat`         | `heating`     |
+| `dry`          | `drying`      |
+| `fan_only`     | `fan`         |
+| `auto`         | `cooling` if room > setpoint, `heating` if room < setpoint, else `idle` |
+
+The `auto` mapping is an inference from `current_temperature` vs.
+`target_temperature` — the same comparison the AC's own thermostat makes — and
+falls back to `idle` when the temperatures are unknown or the room is at
+setpoint. This means `started_cooling` can fire while the compressor is in fact
+coasting; that is the accepted trade-off of a one-way controller with no
+power/run feedback. The derivation lives in the HA integration (consistent with
+`_hvac_mode_from_str`, which also maps a raw payload string to a HA enum) so no
+firmware reflash is required. If a power-usage sensor is ever added to the ESP
+device, this should move to a real reported action.
+
 ## Config flow
 
 The integration has a single config flow step asking for a `device_name` and the
@@ -141,3 +173,21 @@ available once the device publishes `online`.
   need for a config flow.
 - Additional sensor entities for `current_temperature` or power consumption.
 - Service calls for IR-specific functions like "send physical remote command".
+
+## Open items / not yet supported
+
+- **Target humidity (open).** The Panasonic AC has no humidity setpoint — its
+  `dry` mode is an HVAC mode, not a target humidity — so the entity does not
+  expose `ClimateEntityFeature.TARGET_HUMIDITY`, `_attr_target_humidity`, or
+  `async_set_humidity`, and the climate `target_humidity_changed` /
+  `target_humidity_crossed_threshold` triggers, the `target_humidity`
+  condition, and the `climate.set_humidity` service are not supported. If a
+  humidity setpoint ever becomes meaningful (for example a separate
+  dehumidifier or a humidity-sensor-driven automation), add the feature flag,
+  the attribute, the setter, and a `target_humidity` field in the state payload.
+- **Preset mode (not supported).** The Panasonic IR protocol as implemented has
+  no preset/economy concept, so the entity exposes no
+  `ClimateEntityFeature.PRESET_MODE`, no `_attr_preset_mode` / `_attr_preset_modes`,
+  and no `async_set_preset_mode`; the `climate.set_preset_mode` service and any
+  preset-gated triggers/conditions are not available. Add this only if a real
+  preset (for example mapping the `Quiet` fan level) is defined.

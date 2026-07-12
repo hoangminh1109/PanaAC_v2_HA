@@ -76,6 +76,87 @@ custom_components/panaac_v2/
   modes shortly after HA starts even if the device is currently quiet on the
   state topic.
 
+## Automation examples
+
+The entity exposes `hvac_action`, so the climate building-block triggers and
+conditions work (`started_cooling`, `is_cooling`, …). These follow the current
+Home Assistant YAML style — `triggers:`/`conditions:`/`actions:` lists with
+`trigger:`/`condition:`/`action:` keys (the modern names for the legacy
+`platform:`/`service:`). Replace `climate.living_room` with your entity id.
+
+**Trigger — thermostat started cooling**
+
+```yaml
+triggers:
+  - trigger: climate.started_cooling
+    target:
+      entity_id: climate.living_room
+    options:
+      behavior: each        # each | first | all (default each)
+      for: "00:00:00"        # fires immediately by default
+```
+
+**Condition — thermostat is cooling** (gated behind a state change)
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: climate.living_room
+    attribute: hvac_action
+    to: cooling
+conditions:
+  - condition: climate.is_cooling
+    target:
+      entity_id: climate.living_room
+    options:
+      behavior: any          # any | all (default any)
+```
+
+**Actions — set mode, target temperature, fan, swing**
+
+```yaml
+actions:
+  - action: climate.set_hvac_mode
+    target:
+      entity_id: climate.living_room
+    data:
+      hvac_mode: cool        # off | cool | heat | fan_only | dry | auto
+
+  - action: climate.set_temperature
+    target:
+      entity_id: climate.living_room
+    data:
+      temperature: 24
+      hvac_mode: cool        # optional; keeps the current mode if omitted
+
+  - action: climate.set_fan_mode
+    target:
+      entity_id: climate.living_room
+    data:
+      fan_mode: "Level 2"    # Auto | Level 1..5 | Quiet
+
+  - action: climate.set_swing_mode
+    target:
+      entity_id: climate.living_room
+    data:
+      swing_mode: Middle     # Auto | Highest | High | Middle | Low | Lowest
+
+  - action: climate.set_swing_horizontal_mode
+    target:
+      entity_id: climate.living_room
+    data:
+      swing_horizontal_mode: Left   # Auto | Left Max | Left | Middle | Right | Right Max
+```
+
+`turn_on` / `turn_off` / `toggle` take only `target:` (no `data:`) and appear
+once the device advertises more than one HVAC mode that includes `off`.
+
+> `hvac_action` is *derived* from the commanded mode (the controller is one-way
+> IR and cannot report whether the compressor is actually running), so
+> `started_cooling` / `is_cooling` reflect the mode the unit was commanded to,
+> not verified compressor activity. See [`DESIGN.md`](DESIGN.md) for the full
+> mapping.
+
 ## More documentation
 
 - [`DESIGN.md`](DESIGN.md) — architecture, MQTT topic contract, HA entity design.
