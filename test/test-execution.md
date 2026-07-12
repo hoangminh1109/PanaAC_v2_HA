@@ -9,6 +9,23 @@ into two layers:
 Record each step's outcome on its `Result:` line and commit this file to the
 `testing/full-test` branch.
 
+## Workspace layout
+
+These instructions assume the portable workspace root is `HA/` and the repos
+sit under:
+
+```text
+HA/
+  ha/
+    core/
+    PanaAC_v2_HA/
+  esphome/
+    PanaAC_v2_ESPHome/
+```
+
+Use paths relative to the workspace root so the whole `HA/` tree can be moved
+without rewriting the docs or scripts.
+
 ## Recommended order
 
 1. Run the stubbed pytest layer first.
@@ -38,7 +55,7 @@ python3 test/run_stubbed_pytest.py --group all
   `ha/core` with the workspace `core/.venv` (Python 3.14, `uv`). Bring it up
   with the `ha-dev-setup` skill, or:
   ```
-  cd /home/hoangminh/AgentsWork/Codex/HA/ha/core
+  cd ha/core
   echo 'mnhmnh' | sudo -S systemctl start mosquitto   # broker
   nohup ./.venv/bin/hass -c config > /tmp/ha_core_run.log 2>&1 &
   ```
@@ -72,6 +89,13 @@ python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_p
 python3 test/run_full_test.py run --suite ha.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
 python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
 python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+From the workspace root `HA/`, the same commands are:
+
+```bash
+cd ha/PanaAC_v2_HA
+python3 test/run_full_test.py list
 ```
 
 Interpretation:

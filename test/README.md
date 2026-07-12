@@ -5,6 +5,17 @@ branch (`testing/full-test`) holds the plan only — the integration source is
 unchanged from `main`. A later agent (human or AI) executes the plan against a
 running HA instance and the flashed ESPHome device.
 
+Workspace layout is assumed to be relative to a portable `HA/` root:
+
+```text
+HA/
+  ha/
+    core/
+    PanaAC_v2_HA/
+  esphome/
+    PanaAC_v2_ESPHome/
+```
+
 The plan is split into two documents:
 
 - [`test-specification.md`](test-specification.md) — **what** to test: the
