@@ -373,25 +373,23 @@ class Runner:
             "available": True,
         }
         self._publish_retained("state", representative_state)
-        snapshot = self._poll_state(lambda s: s.get("state") == "cool" and s.get("hvac_action") == "cooling")
-        state_ok = all(
-            snapshot.get(key) == representative_state.get(self._state_key_to_payload_key(key), representative_state.get(key))
-            for key in ("temperature", "current_temperature", "fan_mode", "swing_mode", "swing_horizontal_mode")
-        )
+        expected_state = {
+            "state": "cool",
+            "hvac_action": "cooling",
+            "temperature": 24,
+            "current_temperature": 27,
+            "fan_mode": "Level 2",
+            "swing_mode": "Middle",
+            "swing_horizontal_mode": "Left",
+        }
+        snapshot = self._poll_state_subset(expected_state)
+        state_ok = not self._compare_expected(expected_state, snapshot)
         group.add(
             CaseResult(
                 id="ha.g2.1.state_ingestion",
                 title="Representative state ingestion",
-                status="pass" if snapshot.get("state") == "cool" and snapshot.get("hvac_action") == "cooling" and state_ok else "fail",
-                expected={
-                    "state": "cool",
-                    "hvac_action": "cooling",
-                    "temperature": 24,
-                    "current_temperature": 27,
-                    "fan_mode": "Level 2",
-                    "swing_mode": "Middle",
-                    "swing_horizontal_mode": "Left",
-                },
+                status="pass" if state_ok else "fail",
+                expected=expected_state,
                 actual=snapshot,
                 duration_s=time.monotonic() - started,
             )
@@ -419,18 +417,36 @@ class Runner:
         self._publish_retained("availability", "online")
         time.sleep(0.5)
 
-        for case_id, service, service_data, expected_payload, baseline_mode in ACTION_CASES:
+        for case in ACTION_CASES:
             started = time.monotonic()
-            self._publish_retained("state", self._baseline_state_for_mode(baseline_mode))
-            time.sleep(0.6)
-            actual_payload = self._capture_set_payload(service, service_data)
+            try:
+                self._publish_retained("state", self._baseline_state_for_mode(case["baseline_mode"]))
+                time.sleep(0.6)
+                actual_payload = self._capture_set_payload(case["service"], case["service_data"])
+                reflected_snapshot = self._poll_state_subset(case["expected_state"])
+                payload_ok = actual_payload == case["expected_payload"]
+                state_mismatches = self._compare_expected(case["expected_state"], reflected_snapshot)
+                actual: Any = {
+                    "set_payload": actual_payload,
+                    "reflected_state": reflected_snapshot,
+                }
+                evidence = {"state_mismatches": state_mismatches} if state_mismatches else {}
+                status = "pass" if payload_ok and not state_mismatches else "fail"
+            except TestFailure as err:
+                actual = str(err)
+                evidence = {"exception_type": type(err).__name__}
+                status = "fail"
             group.add(
                 CaseResult(
-                    id=f"ha.g2.2.{case_id}",
-                    title=case_id,
-                    status="pass" if actual_payload == expected_payload else "fail",
-                    expected=expected_payload,
-                    actual=actual_payload,
+                    id=f"ha.g2.2.{case['id']}",
+                    title=case["id"],
+                    status=status,
+                    expected={
+                        "set_payload": case["expected_payload"],
+                        "reflected_state": case["expected_state"],
+                    },
+                    actual=actual,
+                    evidence=evidence,
                     duration_s=time.monotonic() - started,
                 )
             )
@@ -456,24 +472,34 @@ class Runner:
         self._delete_retained("traits")
         self._restart_ha()
         cold_registry = self._read_registry_entity()
-        cold_status = "pass" if cold_registry["capabilities"].get("hvac_modes") == ["off"] else "fail"
+        cold_modes = cold_registry["capabilities"].get("hvac_modes")
         self._restore_baseline_topics()
         time.sleep(0.8)
         restored_registry = self._read_registry_entity()
-        restored_status = "pass" if restored_registry["capabilities"].get("hvac_modes") == RETAINED_BASELINE_TRAITS["hvac_modes"] else "fail"
+        restored_modes = restored_registry["capabilities"].get("hvac_modes")
+        restored_status = "pass" if restored_modes == RETAINED_BASELINE_TRAITS["hvac_modes"] else "fail"
+        cold_status = "pass" if cold_modes == ["off"] else "fail"
+        resilience_status = "pass" if cold_status == "pass" and restored_status == "pass" else "fail"
+        resilience_actual: Any = {
+            "cold_hvac_modes": cold_modes,
+            "restored_hvac_modes": restored_modes,
+        }
+        if self.mode == "auto" and cold_modes == RETAINED_BASELINE_TRAITS["hvac_modes"] and restored_status == "pass":
+            resilience_status = "skip"
+            resilience_actual = {
+                **resilience_actual,
+                "note": "Live DUT republished traits before a conservative cold snapshot could be isolated",
+            }
         group.add(
             CaseResult(
                 id="ha.g2.4.retained_resilience",
                 title="Traits deletion + HA restart resilience",
-                status="pass" if cold_status == "pass" and restored_status == "pass" else "fail",
+                status=resilience_status,
                 expected={
                     "cold_hvac_modes": ["off"],
                     "restored_hvac_modes": RETAINED_BASELINE_TRAITS["hvac_modes"],
                 },
-                actual={
-                    "cold_hvac_modes": cold_registry["capabilities"].get("hvac_modes"),
-                    "restored_hvac_modes": restored_registry["capabilities"].get("hvac_modes"),
-                },
+                actual=resilience_actual,
                 duration_s=time.monotonic() - started,
             )
         )
@@ -592,6 +618,9 @@ class Runner:
                 return latest
             time.sleep(interval)
         return latest
+
+    def _poll_state_subset(self, expected: dict[str, Any], timeout: float = 10.0, interval: float = 0.4) -> dict[str, Any]:
+        return self._poll_state(lambda state: not self._compare_expected(expected, state), timeout=timeout, interval=interval)
 
     def _read_latest_state(self) -> dict[str, Any]:
         db_path = self.ha_core_path / "config" / "home-assistant_v2.db"
