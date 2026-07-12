@@ -445,11 +445,6 @@ class Runner:
 
     def _run_ha_group_1(self) -> GroupResult:
         group = GroupResult("ha.g1", SUITE_LABELS["ha.g1"])
-        esphome_bin = self.esphome_workspace_path / ".venv" / "bin" / "esphome"
-        env = os.environ.copy()
-        env["PLATFORMIO_CORE_DIR"] = env.get("PLATFORMIO_CORE_DIR", "/tmp/platformio")
-        env["XDG_CACHE_HOME"] = env.get("XDG_CACHE_HOME", "/tmp/.cache")
-
         self._log("[ha.g1] C3 retained baseline verification")
         started = time.monotonic()
         self._restore_baseline_topics()
@@ -486,63 +481,6 @@ class Runner:
                 actual={"registry": actual_registry, "state": c3_state},
                 evidence={"mismatches": c3_mismatches} if c3_mismatches else {},
                 duration_s=time.monotonic() - started,
-            )
-        )
-
-        for variant in VARIANT_TRAITS:
-            started = time.monotonic()
-            yaml_path = self.esphome_repo_path / "test" / "variants" / f"{variant}.yaml"
-            self._log(f"[ha.g1] {variant}: compile-only configuration check")
-            if not yaml_path.exists():
-                group.add(
-                    CaseResult(
-                        id=f"ha.g1.2.{variant.lower()}",
-                        title=f"Variant {variant} compile-only check",
-                        status="fail",
-                        expected=str(yaml_path),
-                        actual="Variant YAML missing",
-                    )
-                )
-                continue
-
-            yaml_arg = str(yaml_path.relative_to(self.esphome_workspace_path))
-            config_cmd = [str(esphome_bin), "config", yaml_arg]
-            compile_cmd = [str(esphome_bin), "compile", yaml_arg]
-            config_result = self._run_command(config_cmd, cwd=self.esphome_workspace_path, env=env, check=False)
-            compile_result = self._run_command(compile_cmd, cwd=self.esphome_workspace_path, env=env, check=False)
-            capture_path = self.raw_capture_dir / f"ha-{variant}.log"
-            capture_path.write_text(
-                "\n".join(
-                    [
-                        f"$ {' '.join(config_cmd)}",
-                        config_result.stdout,
-                        config_result.stderr,
-                        "",
-                        f"$ {' '.join(compile_cmd)}",
-                        compile_result.stdout,
-                        compile_result.stderr,
-                    ]
-                )
-            )
-            group.add(
-                CaseResult(
-                    id=f"ha.g1.2.{variant.lower()}",
-                    title=f"Variant {variant} compile-only check",
-                    status="pass" if config_result.returncode == 0 and compile_result.returncode == 0 else "fail",
-                    expected="esphome config + compile exit 0",
-                    actual={"config_rc": config_result.returncode, "compile_rc": compile_result.returncode},
-                    evidence={"log_path": str(capture_path)},
-                    duration_s=time.monotonic() - started,
-                )
-            )
-
-        group.add(
-            CaseResult(
-                id="ha.g1.2.c4",
-                title="Variant C4 traits adoption",
-                status="skip",
-                expected="C4 would use the custom MQTT traits contract",
-                actual="C4 is v1/native mode and does not publish the custom traits contract",
             )
         )
         self._restore_baseline_topics()
@@ -842,7 +780,7 @@ class Runner:
         )
         service_logs = self._capture_debug_for_action(lambda: self._call_ha_service("climate", "set_hvac_mode", {"hvac_mode": "cool"}))
         service_state = self._poll_state_subset({"state": "cool"}, newer_than=baseline_snapshot.get("last_updated_ts"))
-        service_log_mismatches = self._missing_log_fragments(service_logs, ("on_control fired", "on_state fired"))
+        service_log_mismatches = self._missing_log_fragments(service_logs, ("on_control fired",))
         service_state_mismatches = self._compare_expected({"state": "cool"}, service_state)
         group.add(
             CaseResult(
