@@ -14,12 +14,19 @@ The plan is split into two documents:
   password), example automation YAML, and how to read results.
 - [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
   runner.
+- [`run_stubbed_pytest.py`](run_stubbed_pytest.py) — offline/stubbed pytest
+  entrypoint for HA-side climate entity behavior.
 - [`automation_runner/data.py`](automation_runner/data.py) — static test data
   and suite definitions.
 - [`automation_runner/core.py`](automation_runner/core.py) — test framework,
   environment management, report generation, and suite execution.
 - [`automation_runner/cli.py`](automation_runner/cli.py) — CLI and interactive
   menu for selecting suites and preparing the environment.
+- [`pytest_stubbed/data.py`](pytest_stubbed/data.py) — stubbed test vectors for
+  MQTT state/traits/command coverage.
+- [`pytest_stubbed/test_climate_entity.py`](pytest_stubbed/test_climate_entity.py)
+  — direct pytest coverage for subscriptions, state/traits ingestion,
+  command publishing, derived `hvac_action`, and invalid-payload handling.
 
 ## Scope (three groups)
 
@@ -54,3 +61,6 @@ Not yet executed. After execution, record results inline in
 - `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
 - `python3 test/run_full_test.py run --suite esphome.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
 - `python3 test/run_full_test.py menu`
+- `python3 test/run_stubbed_pytest.py --group all`
+- `python3 test/run_stubbed_pytest.py --group state`
+- `python3 test/run_stubbed_pytest.py --group commands`
