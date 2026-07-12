@@ -119,15 +119,10 @@ class Runner:
         self.ha_api_token: str | None = None
         self.groups: list[GroupResult] = []
         self._cleanup_callbacks: list[tuple[str, Callable[[], None]]] = []
-        self._stub_storage_backup: dict[str, str] | None = None
-        self._stubbed_integration = False
-        self._stub_entry_id: str | None = None
-        self._stub_ha_bootstrapped = False
 
     def run(self) -> int:
         try:
             self._log("Starting PanaAC v2 HA automated tests")
-            self._maybe_prepare_stub_integration()
             self._validate_environment()
             self.setup_environment(
                 start_ha=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
@@ -213,104 +208,6 @@ class Runner:
         if not self.automations_path.exists():
             raise TestFailure(f"Missing automations file at {self.automations_path}")
 
-    def _maybe_prepare_stub_integration(self) -> None:
-        if "ha.g2" not in self.selected_suites or "ha.g3" in self.selected_suites or self._stubbed_integration:
-            return
-        original_config_path = self.ha_config_path
-        stub_config_path = self.output_dir / "ha_stub_config"
-        if stub_config_path.exists():
-            shutil.rmtree(stub_config_path)
-        shutil.copytree(self.ha_config_path, stub_config_path)
-
-        self._log(f"Preparing stub HA config at {stub_config_path}")
-        self._stop_ha(original_config_path)
-
-        self.ha_config_path = stub_config_path
-        self.ha_port = 8124
-        self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
-        self.automations_path = self.ha_config_path / "automations.yaml"
-        http_storage_path = self.ha_config_path / ".storage" / "http"
-        http_storage = json.loads(http_storage_path.read_text())
-        http_storage["data"]["stable"]["server_port"] = self.ha_port
-        if http_storage["data"].get("pending") is not None:
-            http_storage["data"]["pending"]["server_port"] = self.ha_port
-        http_storage_path.write_text(json.dumps(http_storage, indent=2) + "\n")
-        for db_name in ("home-assistant_v2.db", "home-assistant_v2.db-shm", "home-assistant_v2.db-wal"):
-            db_path = self.ha_config_path / db_name
-            if db_path.exists():
-                db_path.unlink()
-        storage_dir = self.ha_config_path / ".storage"
-        files = {
-            "config_entries": storage_dir / "core.config_entries",
-            "entity_registry": storage_dir / "core.entity_registry",
-            "device_registry": storage_dir / "core.device_registry",
-        }
-        stub_prefix = f"{self.topic_prefix}-stub"
-        stub_name = "PanaAC_AutoStub"
-        stub_entity_id = self._stub_entity_id(stub_name)
-        now = datetime.now().astimezone().isoformat()
-
-        config_entries = json.loads(files["config_entries"].read_text())
-        target_entry: dict[str, Any] | None = None
-        for entry in config_entries["data"]["entries"]:
-            if entry.get("domain") == "panaac_v2":
-                target_entry = entry
-                break
-        if target_entry is None:
-            raise TestFailure("Could not find panaac_v2 config entry for stub setup")
-        target_entry["data"]["topic_prefix"] = stub_prefix
-        target_entry["data"]["device_name"] = stub_name
-        target_entry["title"] = f"{stub_name} ({stub_prefix})"
-        target_entry["unique_id"] = stub_prefix
-        target_entry["modified_at"] = now
-        files["config_entries"].write_text(json.dumps(config_entries, indent=2) + "\n")
-
-        entity_registry = json.loads(files["entity_registry"].read_text())
-        entity_registry["data"]["entities"] = [
-            entity
-            for entity in entity_registry["data"]["entities"]
-            if not (
-                entity.get("platform") == "panaac_v2"
-                or entity.get("config_entry_id") == target_entry["entry_id"]
-            )
-        ]
-        files["entity_registry"].write_text(json.dumps(entity_registry, indent=2) + "\n")
-
-        device_registry = json.loads(files["device_registry"].read_text())
-        device_registry["data"]["devices"] = [
-            device
-            for device in device_registry["data"]["devices"]
-            if target_entry["entry_id"] not in device.get("config_entries", [])
-        ]
-        files["device_registry"].write_text(json.dumps(device_registry, indent=2) + "\n")
-
-        def restore_storage() -> None:
-            self._stop_ha()
-            self.topic_prefix = self.args.topic_prefix
-            self.ha_config_path = self.ha_core_path / "config"
-            self.ha_port = 8123
-            self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
-            self.automations_path = self.ha_config_path / "automations.yaml"
-            self.entity_id = self.args.entity_id
-            self._stubbed_integration = False
-            self._stub_entry_id = None
-            self._stub_ha_bootstrapped = False
-            shutil.rmtree(stub_config_path, ignore_errors=True)
-
-        self._cleanup_callbacks.append(("restore_stub_storage", restore_storage))
-        self._stop_ha()
-        self.topic_prefix = stub_prefix
-        self.entity_id = stub_entity_id
-        self._stubbed_integration = True
-        self._stub_entry_id = target_entry["entry_id"]
-        self._stub_ha_bootstrapped = False
-
-    def _stub_entity_id(self, stub_name: str) -> str:
-        slug = "".join(char.lower() if char.isalnum() else "_" for char in stub_name)
-        while "__" in slug:
-            slug = slug.replace("__", "_")
-        return f"climate.{slug.strip('_')}_remote_controller_v2"
-
     def _entity_present(self, entity_id: str | None = None) -> bool:
         target = entity_id or self.entity_id
         if target is None:
@@ -335,12 +232,6 @@ class Runner:
         for entity in data["data"]["entities"]:
             if entity.get("unique_id") == unique_id:
                 candidates.append(entity["entity_id"])
-            if (
-                self._stub_entry_id
-                and entity.get("platform") == "panaac_v2"
-                and entity.get("config_entry_id") == self._stub_entry_id
-            ):
-                return entity["entity_id"]
         if not candidates:
             return None
 
@@ -966,17 +857,6 @@ class Runner:
         time.sleep(1.0)
 
     def _ensure_ha_running(self) -> None:
-        if self._stubbed_integration:
-            if self._stub_ha_bootstrapped and self._http_ready() and self._entity_present():
-                return
-            if self._http_ready():
-                self._restart_ha()
-            else:
-                self._start_ha()
-                self._wait_for_ha(timeout=120.0)
-            self._wait_for_entity_registration(timeout=120.0, interval=0.5)
-            self._stub_ha_bootstrapped = True
-            return
         if self._http_ready():
             return
         self._start_ha()

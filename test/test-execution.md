@@ -178,18 +178,18 @@ Interpretation:
   publishing, derived `hvac_action`, invalid payload handling, and turn on/off
   behavior without the DUT.
 - `ha.g1` and `ha.g3` are HIL-oriented and use the live HA core config.
-- `ha.g2` is the most runtime-sensitive suite. The runner uses an isolated copy
-  of the HA config for this path so it does not mutate the live `ha/core/config`
-  instance.
+- `ha.g2` is the most runtime-sensitive suite. It now runs against the same
+  live HA core config as `ha.g1`/`ha.g3`, because the isolated copied-config
+  bootstrap proved less reliable than the real HIL path.
 
 ## Current automation status
 
 - `stubbed` pytest path: working and recommended as the first gate
 - `ha.g1`: automated, C3 baseline only
 - `ha.g3`: automated
-- `ha.g2`: automated runner exists, but if it fails during bootstrap, keep the
-  generated `report.md`, `report.json`, and `ha.log` under the output dir and
-  record the failure as a runner issue rather than a product regression
+- `ha.g2`: automated runner exists on the live HA path; if it fails, use the
+  generated `report.md`, `report.json`, and `ha.log` under the output dir to
+  distinguish runner issues from product regressions
 
 ## Reading the entity state without the owner password
 
