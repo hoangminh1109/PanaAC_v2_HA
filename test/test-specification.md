@@ -1,8 +1,7 @@
 # PanaAC v2 HA — test specification
 
 What the tests check. See `test-execution.md` for how to run them. Integration
-reference: the `main` branch of this repo (`testing/full-test` does not change
-integration source).
+reference: the active repo branch under test.
 
 ## Conventions
 

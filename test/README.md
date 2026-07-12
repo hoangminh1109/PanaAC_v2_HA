@@ -1,9 +1,8 @@
 # PanaAC v2 HA — test plan
 
-Full-test plan for the `panaac_v2` Home Assistant custom integration. This
-branch (`testing/full-test`) holds the plan only — the integration source is
-unchanged from `main`. A later agent (human or AI) executes the plan against a
-running HA instance and the flashed ESPHome device.
+Full-test plan for the `panaac_v2` Home Assistant custom integration. These
+documents describe how to validate the integration against a running HA
+instance and the flashed ESPHome device.
 
 Workspace layout is assumed to be relative to a portable `HA/` root:
 

@@ -6,8 +6,8 @@ into two layers:
 - `stubbed` automation for HA-side climate entity behavior, with no DUT needed
 - HIL automation for MQTT, HA runtime, and DUT-facing checks
 
-Record each step's outcome on its `Result:` line and commit this file to the
-`testing/full-test` branch.
+Record each step's outcome on its `Result:` line and commit the updated result
+file to the repo branch you are using for the test run.
 
 ## Workspace layout
 
@@ -373,5 +373,5 @@ the ESPHome test YAML. Result: …
   - output dir `report.md`
   - output dir `report.json`
   - output dir `ha.log`
-- Record every `Result:` line. Commit to the `testing/full-test` branch. Do not
-  push unless asked.
+- Record every `Result:` line. Commit to the repo branch you are using for the
+  test run. Do not push unless asked.
