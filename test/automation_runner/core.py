@@ -123,6 +123,7 @@ class Runner:
         self._stubbed_integration = False
         self._stub_entry_id: str | None = None
         self._stub_ha_bootstrapped = False
+        self._ha_log_start_offset = 0
 
     def run(self) -> int:
         try:
@@ -973,8 +974,8 @@ class Runner:
                 self._restart_ha()
             else:
                 self._start_ha()
-                self._wait_for_ha()
-            self._wait_for_entity_registration(timeout=45.0, interval=0.5)
+                self._wait_for_ha(timeout=120.0, require_initialized_log=True)
+            self._wait_for_entity_registration(timeout=120.0, interval=0.5)
             self._stub_ha_bootstrapped = True
             return
         if self._http_ready():
@@ -991,6 +992,7 @@ class Runner:
     def _start_ha(self, config_path: Path | None = None) -> None:
         target_config_path = config_path or self.ha_config_path
         self._log(f"Starting Home Assistant at {target_config_path}")
+        self._ha_log_start_offset = self.ha_log_path.stat().st_size if self.ha_log_path.exists() else 0
         with self.ha_log_path.open("a") as log_file:
             subprocess.Popen(
                 ["./.venv/bin/hass", "-c", str(target_config_path)],
@@ -1065,13 +1067,19 @@ class Runner:
             return self._run_command(cmd, input_text=f"{sudo_password}\n", check=check)
         return self._run_command(["systemctl", action, "mosquitto"], check=check)
 
-    def _wait_for_ha(self, timeout: float = 60.0) -> None:
+    def _wait_for_ha(self, timeout: float = 60.0, require_initialized_log: bool = False) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._http_ready():
+            if self._http_ready() and (not require_initialized_log or self._ha_initialized_since_start()):
                 return
             time.sleep(1.0)
         raise TestFailure("Home Assistant did not become ready before timeout")
+
+    def _ha_initialized_since_start(self) -> bool:
+        if not self.ha_log_path.exists():
+            return False
+        log_text = self.ha_log_path.read_text(errors="ignore")
+        return "Home Assistant initialized" in log_text[self._ha_log_start_offset :]
 
     def _http_ready(self) -> bool:
         try:
