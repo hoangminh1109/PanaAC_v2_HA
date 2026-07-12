@@ -504,15 +504,28 @@ class Runner:
             )
         )
 
-        group.add(
-            CaseResult(
-                id="ha.g2.4.broker_cycle",
-                title="Broker stop/start resilience",
-                status="blocked" if self.mode == "full-hil" else "skip",
-                expected="Runner controls broker lifecycle and verifies recovery" if self.mode == "full-hil" else "Runner stops and restarts the broker",
-                actual="Broker lifecycle automation is not implemented in this runner version" if self.mode == "full-hil" else "Skipped outside full-hil mode",
+        if self.mode == "full-hil":
+            broker_cycle = self._run_broker_cycle_case()
+            group.add(
+                CaseResult(
+                    id="ha.g2.4.broker_cycle",
+                    title="Broker stop/start resilience",
+                    status=broker_cycle["status"],
+                    expected="Runner controls broker lifecycle and verifies recovery",
+                    actual=broker_cycle["actual"],
+                    evidence=broker_cycle.get("evidence", {}),
+                )
             )
-        )
+        else:
+            group.add(
+                CaseResult(
+                    id="ha.g2.4.broker_cycle",
+                    title="Broker stop/start resilience",
+                    status="skip",
+                    expected="Runner stops and restarts the broker",
+                    actual="Skipped outside full-hil mode",
+                )
+            )
         return group
 
     def _run_ha_group_3(self) -> GroupResult:
@@ -824,6 +837,41 @@ class Runner:
             if self._pid_alive(pid):
                 os.kill(pid, signal.SIGKILL)
 
+    def _run_broker_cycle_case(self) -> dict[str, Any]:
+        started = time.monotonic()
+        try:
+            self._run_broker_service("stop")
+            unavailable_snapshot = self._poll_state(lambda s: s.get("state") == "unavailable", timeout=20.0, interval=0.5)
+            self._run_broker_service("start")
+            recovered_snapshot = self._poll_state(lambda s: s.get("state") != "unavailable", timeout=30.0, interval=0.5)
+            return {
+                "status": "pass" if unavailable_snapshot.get("state") == "unavailable" and recovered_snapshot.get("state") != "unavailable" else "fail",
+                "actual": {
+                    "unavailable_snapshot": unavailable_snapshot,
+                    "recovered_snapshot": recovered_snapshot,
+                },
+                "evidence": {"duration_s": round(time.monotonic() - started, 2)},
+            }
+        except Exception as err:  # noqa: BLE001
+            try:
+                self._run_broker_service("start", check=False)
+            except Exception:
+                pass
+            return {
+                "status": "fail",
+                "actual": str(err),
+                "evidence": {"duration_s": round(time.monotonic() - started, 2)},
+            }
+
+    def _run_broker_service(self, action: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        if action not in {"start", "stop"}:
+            raise TestFailure(f"Unsupported broker service action: {action}")
+        sudo_password = os.environ.get("BROKER_SUDO_PASSWORD")
+        if sudo_password:
+            cmd = ["sudo", "-S", "systemctl", action, "mosquitto"]
+            return self._run_command(cmd, input_text=f"{sudo_password}\n", check=check)
+        return self._run_command(["systemctl", action, "mosquitto"], check=check)
+
     def _wait_for_ha(self, timeout: float = 60.0) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -951,9 +999,10 @@ class Runner:
         *,
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
         check: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
+        result = subprocess.run(cmd, cwd=cwd, env=env, input=input_text, text=True, capture_output=True)
         if check and result.returncode != 0:
             raise TestFailure(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
