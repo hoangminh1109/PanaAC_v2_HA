@@ -185,7 +185,7 @@ Interpretation:
 ## Current automation status
 
 - `stubbed` pytest path: working and recommended as the first gate
-- `ha.g1`: automated
+- `ha.g1`: automated, C3 baseline only
 - `ha.g3`: automated
 - `ha.g2`: automated runner exists, but if it fails during bootstrap, keep the
   generated `report.md`, `report.json`, and `ha.log` under the output dir and
@@ -217,7 +217,7 @@ The recorder commits a few seconds after a state change; poll until a new
 `last_updated_ts` appears. To inspect a specific mode's `hvac_action`, publish
 the state, wait ~2–3 s, then run the snippet.
 
-## Group 1 — Traits consistency
+## Group 1 — Traits consistency with the live C3 firmware
 
 Automated path:
 
@@ -234,13 +234,13 @@ mosquitto_pub -h 127.0.0.1 -u mqtt_user -P mqtt_pass -t panaac_v2/esphome-panaac
 Read the entity (snippet above) before the device republishes `traits`. Expect
 `hvac_modes=[off]`, empty fan/swing, only `TARGET_TEMPERATURE`. Result: …
 
-### 1.2 Per variant
-For each ESPHome variant C1–C6 (flash per the ESPHome repo's execution doc),
-wait for the retained `traits`, and read the entity attributes. Compare to
-`test-specification.md` §1.2. Capture `hvac_modes`, `fan_modes`, `swing_modes`,
-`swing_horizontal_modes`, `min_temp`, `max_temp`, `target_temperature_step`,
-and the `supported_features`-derived presence of fan/swing/turn_on-off.
-Result C1: … C2: … C3: … C4: … C5: … C6: …
+### 1.2 C3 baseline
+With the device flashed to C3, wait for the retained `traits`, and read the
+entity attributes. Compare to `test-specification.md` §1.2. Capture
+`hvac_modes`, `fan_modes`, `swing_modes`, `swing_horizontal_modes`, `min_temp`,
+`max_temp`, `target_temperature_step`, and the `supported_features`-derived
+presence of fan/swing/turn_on-off.
+Result: …
 
 ## Group 2 — Two-way MQTT with the ESPHome side
 

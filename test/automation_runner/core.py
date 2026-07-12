@@ -137,9 +137,6 @@ class Runner:
             if self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}:
                 self.entity_id = self.entity_id or self._detect_entity_id()
 
-            if "esphome.g1" in self.selected_suites:
-                self.groups.append(self._run_esphome_group())
-
             if self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}:
                 self.groups.extend(self._run_ha_groups())
 
@@ -213,8 +210,6 @@ class Runner:
                 raise TestFailure(f"Required command not found: {cmd}")
         if not (self.ha_core_path / ".venv" / "bin" / "hass").exists():
             raise TestFailure(f"Missing Home Assistant hass binary under {self.ha_core_path}")
-        if "esphome.g1" in self.selected_suites and not (self.esphome_workspace_path / ".venv" / "bin" / "esphome").exists():
-            raise TestFailure(f"Missing ESPHome CLI under {self.esphome_workspace_path}")
         if not self.automations_path.exists():
             raise TestFailure(f"Missing automations file at {self.automations_path}")
 

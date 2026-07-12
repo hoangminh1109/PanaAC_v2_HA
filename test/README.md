@@ -41,10 +41,10 @@ The plan is split into two documents:
 
 ## Scope (three groups)
 
-1. **Traits consistency with the ESPHome configuration** — the HA climate
-   entity's advertised modes/ranges match the device's `traits` payload for
-   each ESPHome config variant, including the conservative defaults before the
-   first `traits` message arrives.
+1. **Traits consistency with the live C3 firmware** — the HA climate entity's
+   advertised modes/ranges match the device's `traits` payload on the flashed
+   C3 firmware, including the conservative defaults before the first `traits`
+   message arrives. The ESPHome variant matrix is covered in the ESPHome repo.
 2. **Two-way MQTT with the ESPHome side** — the integration subscribes to
    `availability`/`traits`/`state` and publishes commands to `set`; the device
    applies them and the HA entity reflects state; `hvac_action` is derived.
@@ -70,7 +70,7 @@ Not yet executed. After execution, record results inline in
 
 - `python3 test/run_full_test.py list`
 - `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
-- `python3 test/run_full_test.py run --suite esphome.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py run --suite ha.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
 - `python3 test/run_full_test.py stubbed --group all`
 - `python3 test/run_full_test.py menu`
 - `python3 test/run_stubbed_pytest.py --group all`

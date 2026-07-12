@@ -31,11 +31,10 @@ The integration exposes (from `climate.py`):
 
 ---
 
-## Group 1 — Traits consistency with the ESPHome configuration
+## Group 1 — Traits consistency with the live C3 firmware
 
-**Goal:** the HA entity advertises exactly what the device's `traits` payload
-says, for each ESPHome config variant, and is conservative before `traits`
-arrives.
+**Goal:** the HA entity advertises exactly what the flashed C3 device's
+`traits` payload says, and is conservative before `traits` arrives.
 
 ### 1.1 Before the first `traits` message
 On a fresh start with no retained `traits` (delete the retained message first):
@@ -46,9 +45,8 @@ On a fresh start with no retained `traits` (delete the retained message first):
 Pass: the entity is safe/empty until `traits` arrives; no unsupported controls
 are exposed.
 
-### 1.2 After `traits`, per ESPHome variant
-Flash the device with each ESPHome variant (C1–C6 from the ESPHome repo's
-`test-specification.md` §1.1). After the retained `traits` arrives, the HA
+### 1.2 After `traits`, C3 baseline
+With the device flashed to C3, after the retained `traits` arrives, the HA
 entity's attributes must equal the device payload:
 
 - `hvac_modes` == `traits.hvac_modes` (order-independent).
@@ -63,14 +61,14 @@ entity's attributes must equal the device payload:
   `swing_horizontal_modes` non-empty, `TURN_ON`/`TURN_OFF` iff
   `len(hvac_modes) > 1 and "off" in hvac_modes`.
 
-Example — variant C3 (5-level, swing horizontal, all modes):
+Example — C3 baseline (5-level, swing horizontal, all modes):
 `hvac_modes=[off,cool,heat,fan_only,dry,auto]`,
 `fan_modes=[Auto,Level 1,Level 2,Level 3,Level 4,Level 5,Quiet]`,
 `swing_modes=[Auto,Highest,High,Middle,Low,Lowest]`,
 `swing_horizontal_modes=[Auto,Left Max,Left,Middle,Right,Right Max]`,
 `min_temp=16, max_temp=30, target_temperature_step=0.5`, all five features on.
 
-Pass: §1.1 and §1.2 hold for every variant tested.
+Pass: §1.1 and §1.2 hold for the flashed C3 firmware.
 
 ---
 

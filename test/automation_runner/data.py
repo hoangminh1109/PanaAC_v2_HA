@@ -292,9 +292,8 @@ ACTION_CASES = [
     },
 ]
 
-SUITE_CHOICES = ("esphome.g1", "ha.g1", "ha.g2", "ha.g3")
+SUITE_CHOICES = ("ha.g1", "ha.g2", "ha.g3")
 SUITE_LABELS = {
-    "esphome.g1": "ESPHome Group 1 - Variant config/compile",
     "ha.g1": "HA Group 1 - Traits consistency",
     "ha.g2": "HA Group 2 - MQTT round-trip and hvac_action",
     "ha.g3": "HA Group 3 - Building-block automations",
