@@ -216,10 +216,15 @@ class Runner:
     def _maybe_prepare_stub_integration(self) -> None:
         if "ha.g2" not in self.selected_suites or "ha.g3" in self.selected_suites or self._stubbed_integration:
             return
+        original_config_path = self.ha_config_path
         stub_config_path = self.output_dir / "ha_stub_config"
         if stub_config_path.exists():
             shutil.rmtree(stub_config_path)
         shutil.copytree(self.ha_config_path, stub_config_path)
+
+        self._log(f"Preparing stub HA config at {stub_config_path}")
+        self._stop_ha(original_config_path)
+
         self.ha_config_path = stub_config_path
         self.ha_port = 8124
         self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
@@ -317,7 +322,7 @@ class Runner:
     def _wait_for_entity_registration(self, timeout: float = 45.0, interval: float = 0.5) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._entity_present():
+            if self._find_entity_id() is not None:
                 return
             time.sleep(interval)
         raise TestFailure(f"Entity {self.entity_id} did not appear in entity registry before timeout")
@@ -983,27 +988,29 @@ class Runner:
         if snapshot.get("state") == "unavailable":
             raise TestFailure(f"Entity {self.entity_id} did not become available after baseline topic restore")
 
-    def _start_ha(self) -> None:
-        self._log(f"Starting Home Assistant at {self.ha_config_path}")
+    def _start_ha(self, config_path: Path | None = None) -> None:
+        target_config_path = config_path or self.ha_config_path
+        self._log(f"Starting Home Assistant at {target_config_path}")
         with self.ha_log_path.open("a") as log_file:
             subprocess.Popen(
-                ["./.venv/bin/hass", "-c", str(self.ha_config_path)],
+                ["./.venv/bin/hass", "-c", str(target_config_path)],
                 cwd=self.ha_core_path,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
 
-    def _stop_ha(self) -> None:
+    def _stop_ha(self, config_path: Path | None = None) -> None:
+        target_config_path = config_path or self.ha_config_path
         self._log("Stopping Home Assistant")
-        pid_file = self.ha_config_path / "home-assistant.pid"
+        pid_file = target_config_path / "home-assistant.pid"
         pids: list[int] = []
         if pid_file.exists():
             content = pid_file.read_text().strip()
             if content.isdigit():
                 pids.append(int(content))
         if not pids:
-            result = self._run_command(["pgrep", "-f", f"hass -c {self.ha_config_path}"], check=False)
+            result = self._run_command(["pgrep", "-f", f"hass -c {target_config_path}"], check=False)
             for line in result.stdout.splitlines():
                 if line.strip().isdigit():
                     pids.append(int(line.strip()))
