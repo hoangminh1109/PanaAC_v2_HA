@@ -519,6 +519,128 @@ class Runner:
         group = GroupResult("ha.g3", SUITE_LABELS["ha.g3"])
 
         started = time.monotonic()
+        control_logs = self._press_esphome_button("esphome-panaac-v2/button/control_cool_24c/command")
+        control_state = self._poll_state_subset(
+            {
+                "state": "cool",
+                "temperature": 24,
+                "fan_mode": "Auto",
+                "swing_mode": "Auto",
+            }
+        )
+        control_log_mismatches = self._missing_log_fragments(control_logs, ("on_control fired", "on_state fired", "Sending remote code"))
+        control_state_mismatches = self._compare_expected(
+            {
+                "state": "cool",
+                "temperature": 24,
+                "fan_mode": "Auto",
+                "swing_mode": "Auto",
+            },
+            control_state,
+        )
+        group.add(
+            CaseResult(
+                id="ha.g3.1",
+                title="ESPHome climate.control observed via HA",
+                status="pass" if not control_log_mismatches and not control_state_mismatches else "fail",
+                expected={
+                    "ha_state": {"state": "cool", "temperature": 24, "fan_mode": "Auto", "swing_mode": "Auto"},
+                    "dut_logs": ["on_control fired", "on_state fired", "Sending remote code"],
+                },
+                actual={"ha_state": control_state, "dut_logs": control_logs},
+                evidence={
+                    key: value
+                    for key, value in {
+                        "state_mismatches": control_state_mismatches,
+                        "log_mismatches": control_log_mismatches,
+                    }.items()
+                    if value
+                },
+                duration_s=time.monotonic() - started,
+            )
+        )
+
+        started = time.monotonic()
+        make_call_logs = self._press_esphome_button("esphome-panaac-v2/button/lambda_make_call_cool_24c/command")
+        make_call_state = self._poll_state_subset(
+            {
+                "state": "cool",
+                "temperature": 24,
+                "fan_mode": "Level 2",
+            }
+        )
+        make_call_log_mismatches = self._missing_log_fragments(make_call_logs, ("on_control fired", "on_state fired", "Sending remote code"))
+        make_call_state_mismatches = self._compare_expected(
+            {
+                "state": "cool",
+                "temperature": 24,
+                "fan_mode": "Level 2",
+            },
+            make_call_state,
+        )
+        group.add(
+            CaseResult(
+                id="ha.g3.2",
+                title="ESPHome lambda make_call observed via HA",
+                status="pass" if not make_call_log_mismatches and not make_call_state_mismatches else "fail",
+                expected={
+                    "ha_state": {"state": "cool", "temperature": 24, "fan_mode": "Level 2"},
+                    "dut_logs": ["on_control fired", "on_state fired", "Sending remote code"],
+                },
+                actual={"ha_state": make_call_state, "dut_logs": make_call_logs},
+                evidence={
+                    key: value
+                    for key, value in {
+                        "state_mismatches": make_call_state_mismatches,
+                        "log_mismatches": make_call_log_mismatches,
+                    }.items()
+                    if value
+                },
+                duration_s=time.monotonic() - started,
+            )
+        )
+
+        started = time.monotonic()
+        self._publish_retained(
+            "state",
+            {
+                "mode": "off",
+                "target_temperature": 24,
+                "current_temperature": 26.5,
+                "fan_mode": "Auto",
+                "swing_mode": "Auto",
+                "swing_horizontal_mode": "Auto",
+                "available": True,
+            },
+        )
+        time.sleep(0.8)
+        service_logs = self._capture_debug_for_action(lambda: self._call_ha_service("climate", "set_hvac_mode", {"hvac_mode": "cool"}))
+        service_state = self._poll_state_subset({"state": "cool"})
+        service_log_mismatches = self._missing_log_fragments(service_logs, ("on_control fired", "on_state fired"))
+        service_state_mismatches = self._compare_expected({"state": "cool"}, service_state)
+        group.add(
+            CaseResult(
+                id="ha.g3.3",
+                title="ESPHome on_state / on_control observed via HA",
+                status="pass" if not service_log_mismatches and not service_state_mismatches else "fail",
+                expected={
+                    "ha_state": {"state": "cool"},
+                    "dut_logs": ["on_control fired", "on_state fired"],
+                },
+                actual={"ha_state": service_state, "dut_logs": service_logs},
+                evidence={
+                    key: value
+                    for key, value in {
+                        "state_mismatches": service_state_mismatches,
+                        "log_mismatches": service_log_mismatches,
+                    }.items()
+                    if value
+                },
+                duration_s=time.monotonic() - started,
+            )
+        )
+
+        started = time.monotonic()
         trigger_log = self.raw_capture_dir / "ha-climate-trigger-tests.log"
         trigger_cmd = [
             "uv",
@@ -571,27 +693,6 @@ class Runner:
                 duration_s=time.monotonic() - started,
             )
         )
-
-        blocked_status = "blocked" if self.mode == "full-hil" else "skip"
-        blocked_actual = (
-            "full-hil mode requested but DUT flashing/log capture is not implemented"
-            if self.mode == "full-hil"
-            else "Skipped in auto mode without DUT flash/log hooks"
-        )
-        for suffix, title in (
-            ("3.1", "ESPHome climate.control observed via HA"),
-            ("3.2", "ESPHome lambda make_call observed via HA"),
-            ("3.3", "ESPHome on_state / on_control observed via HA"),
-        ):
-            group.add(
-                CaseResult(
-                    id=f"ha.g{suffix}",
-                    title=title,
-                    status=blocked_status,
-                    expected="DUT exposes the automation test build and runtime logs",
-                    actual=blocked_actual,
-                )
-            )
         return group
 
     def _capture_set_payload(self, service: str, service_data: dict[str, Any]) -> Any:
@@ -621,6 +722,19 @@ class Runner:
 
     def _poll_state_subset(self, expected: dict[str, Any], timeout: float = 10.0, interval: float = 0.4) -> dict[str, Any]:
         return self._poll_state(lambda state: not self._compare_expected(expected, state), timeout=timeout, interval=interval)
+
+    def _press_esphome_button(self, topic: str) -> list[str]:
+        return self._capture_debug_for_action(lambda: self._publish_text(topic, "PRESS"))
+
+    def _capture_debug_for_action(self, action: Callable[[], None], *, count: int = 6, timeout: int = 6) -> list[str]:
+        sub_cmd = self._mosquitto_sub_command(topic="esphome-panaac-v2/debug", count=count, timeout=timeout)
+        proc = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.2)
+        action()
+        stdout, stderr = proc.communicate(timeout=timeout + 2)
+        if proc.returncode != 0 and not stdout.strip():
+            raise TestFailure(f"Failed to capture DUT debug logs: {stderr.strip() or stdout.strip()}")
+        return [line.strip() for line in stdout.splitlines() if line.strip()]
 
     def _read_latest_state(self) -> dict[str, Any]:
         db_path = self.ha_core_path / "config" / "home-assistant_v2.db"
@@ -772,6 +886,9 @@ class Runner:
             for key, value in expected.items()
             if actual.get(key) != value
         }
+
+    def _missing_log_fragments(self, lines: list[str], fragments: tuple[str, ...]) -> list[str]:
+        return [fragment for fragment in fragments if not any(fragment in line for line in lines)]
 
     def _expected_supported_features(self, payload: dict[str, Any]) -> int:
         features = TARGET_TEMPERATURE
