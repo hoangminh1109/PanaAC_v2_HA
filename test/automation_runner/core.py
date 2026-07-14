@@ -21,7 +21,9 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import re
 import selectors
+import socket
 from pathlib import Path
 import shutil
 import signal
@@ -29,6 +31,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -37,6 +40,7 @@ from urllib.request import Request, urlopen
 from .data import (
     ACTION_CASES,
     CURRENT_STATE_KEYS,
+    DEFAULT_MQTT_PORT,
     DEFAULT_TOPIC_PREFIX,
     FAN_MODE,
     HVAC_ACTION_CASES,
@@ -93,17 +97,41 @@ class Runner:
         self.args = args
         self.repo_root = Path(__file__).resolve().parents[2]
         self.ha_core_path = Path(args.ha_core_path).resolve()
-        self.ha_config_path = self.ha_core_path / "config"
+        self.fresh_ha_config = getattr(args, "fresh_ha_config", False)
+        self.reset_fresh_ha_config = getattr(args, "reset_fresh_ha_config", False)
+        self.cleanup_test_config = getattr(args, "cleanup_test_config", False)
+        self.test_env_root = (self.repo_root / "test" / "test_env").resolve()
+        requested_config_path = getattr(args, "ha_config_path", None)
+        if requested_config_path:
+            self.ha_config_path = Path(requested_config_path).resolve()
+        elif self.fresh_ha_config:
+            self.ha_config_path = self._allocate_fresh_ha_config_path()
+        else:
+            self.ha_config_path = (self.ha_core_path / "config").resolve()
         self.esphome_repo_path = Path(args.esphome_repo_path).resolve()
         self.esphome_workspace_path = self._resolve_esphome_workspace_path()
         self.output_dir = Path(args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.ha_port = 8123
+        requested_port = getattr(args, "ha_port", 8123)
+        if self.fresh_ha_config and requested_port == 8123:
+            requested_port = 8125
+        self.ha_port = requested_port
         self.ha_base_url = f"http://127.0.0.1:{self.ha_port}"
+        self.ha_test_name = getattr(args, "ha_test_name", "PanaAC Test Home")
+        self.ha_test_username = getattr(args, "ha_test_username", "tester")
+        self.ha_test_password = getattr(args, "ha_test_password", "tester-pass-123")
+        self.device_name = getattr(args, "device_name", "Test AC")
+        self.mqtt_broker_mode = getattr(args, "mqtt_broker_mode", "external")
         self.mqtt_host = args.mqtt_host
         self.mqtt_port = args.mqtt_port
         self.mqtt_user = args.mqtt_user
         self.mqtt_pass = args.mqtt_pass
+        if self.mqtt_broker_mode == "spawn":
+            self.mqtt_host = "127.0.0.1"
+            if self.mqtt_port == DEFAULT_MQTT_PORT:
+                self.mqtt_port = self._allocate_free_tcp_port()
+            self.mqtt_user = None
+            self.mqtt_pass = None
         self.topic_prefix = args.topic_prefix
         self.mode = args.mode
         self.selected_suites = set(args.suites or SUITE_CHOICES)
@@ -111,6 +139,8 @@ class Runner:
         self.report_json_path = self.output_dir / "report.json"
         self.report_md_path = self.output_dir / "report.md"
         self.ha_log_path = self.output_dir / "ha.log"
+        self.mqtt_log_path = self.output_dir / "mqtt-broker.log"
+        self.mqtt_config_path = self.output_dir / "mosquitto.conf"
         self.raw_capture_dir = self.output_dir / "captures"
         self.raw_capture_dir.mkdir(parents=True, exist_ok=True)
         self.automations_path = self.ha_config_path / "automations.yaml"
@@ -119,10 +149,17 @@ class Runner:
         self.ha_api_token: str | None = None
         self.groups: list[GroupResult] = []
         self._cleanup_callbacks: list[tuple[str, Callable[[], None]]] = []
+        self._fresh_config_prepared = False
+        self._fresh_profile_bootstrapped = False
+        self._mqtt_broker_proc: subprocess.Popen[bytes] | None = None
 
     def run(self) -> int:
         try:
             self._log("Starting PanaAC v2 HA automated tests")
+            if self.fresh_ha_config:
+                self._prepare_fresh_ha_config()
+            if self.mqtt_broker_mode == "spawn":
+                self._ensure_mqtt_broker_ready()
             self._validate_environment()
             self.setup_environment(
                 start_ha=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
@@ -165,6 +202,12 @@ class Runner:
         verify_mqtt: bool,
     ) -> EnvironmentStatus:
         status = EnvironmentStatus()
+        if self.fresh_ha_config:
+            self._prepare_fresh_ha_config()
+            status.add(f"Prepared isolated HA config at {self.ha_config_path}")
+        if self.mqtt_broker_mode == "spawn":
+            self._ensure_mqtt_broker_ready()
+            status.add(f"Started isolated MQTT broker on {self.mqtt_host}:{self.mqtt_port}")
         self._validate_environment()
         status.add("Validated required binaries and local paths")
         if verify_mqtt:
@@ -174,16 +217,410 @@ class Runner:
         if start_ha:
             self._log("Ensuring Home Assistant is running")
             self._ensure_ha_running()
-            status.add("Ensured Home Assistant is running")
-            self.entity_id = self.entity_id or self._detect_entity_id()
-            status.add(f"Resolved entity_id={self.entity_id}")
+            status.add(f"Ensured Home Assistant is running on port {self.ha_port}")
+            if self.fresh_ha_config:
+                self._bootstrap_fresh_ha_profile()
+                status.add(
+                    f"Bootstrapped fresh HA profile with tester user '{self.ha_test_username}' and integration entries"
+                )
+            if self.entity_id is not None:
+                status.add(f"Resolved entity_id={self.entity_id}")
         if seed_baseline:
             self._log("Restoring baseline retained topics")
             self._restore_baseline_topics()
             if start_ha:
+                if self.entity_id is None:
+                    self.entity_id = self._detect_entity_id(timeout=45.0)
+                    status.add(f"Resolved entity_id={self.entity_id}")
                 self._ensure_entity_ready()
             status.add("Published retained baseline traits/state/availability topics")
         return status
+
+    def validate_dev_environment(self) -> EnvironmentStatus:
+        if self.fresh_ha_config:
+            self._prepare_fresh_ha_config()
+        status = EnvironmentStatus()
+        if shutil.which("uv") is None:
+            raise TestFailure("Required command not found: uv")
+        status.add("Found uv on PATH")
+
+        hass_bin = self.ha_core_path / ".venv" / "bin" / "hass"
+        if not hass_bin.exists():
+            raise TestFailure(
+                f"Missing Home Assistant hass binary under {self.ha_core_path}; run script/setup from ha/core first"
+            )
+        status.add(f"Found Home Assistant hass binary at {hass_bin}")
+
+        if not self.ha_config_path.exists():
+            raise TestFailure(
+                f"Missing Home Assistant config directory at {self.ha_config_path}; start Home Assistant once to create it"
+            )
+        status.add(f"Found Home Assistant config directory at {self.ha_config_path}")
+
+        integration_path = self.ha_config_path / "custom_components" / "panaac_v2"
+        if integration_path.exists():
+            status.add(f"Found custom integration link at {integration_path}")
+        else:
+            status.add(
+                f"Missing custom integration link at {integration_path}; link ha/PanaAC_v2_HA/custom_components/panaac_v2 into ha/core/config/custom_components"
+            )
+
+        if self.automations_path.exists():
+            status.add(f"Found automations file at {self.automations_path}")
+        else:
+            status.add(
+                f"Missing automations file at {self.automations_path}; start Home Assistant once to create the default config scaffold"
+            )
+        return status
+
+    def _allocate_free_tcp_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            return int(sock.getsockname()[1])
+
+    def _ensure_mqtt_broker_ready(self) -> None:
+        if self.mqtt_broker_mode != "spawn" or self._mqtt_broker_proc is not None:
+            return
+        mosquitto_bin = shutil.which("mosquitto")
+        if mosquitto_bin is None:
+            raise TestFailure("Required command not found: mosquitto")
+        self._log(f"Starting isolated MQTT broker on {self.mqtt_host}:{self.mqtt_port}")
+        self.mqtt_config_path.write_text(
+            "\n".join(
+                (
+                    f"listener {self.mqtt_port} {self.mqtt_host}",
+                    "allow_anonymous true",
+                    "persistence false",
+                )
+            )
+            + "\n"
+        )
+        log_file = self.mqtt_log_path.open("a")
+        self._mqtt_broker_proc = subprocess.Popen(
+            [mosquitto_bin, "-c", str(self.mqtt_config_path)],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self._mqtt_broker_proc.poll() is not None:
+                break
+            try:
+                with socket.create_connection((self.mqtt_host, self.mqtt_port), timeout=1.0):
+                    return
+            except OSError:
+                time.sleep(0.2)
+        broker_log = self.mqtt_log_path.read_text() if self.mqtt_log_path.exists() else ""
+        raise TestFailure(
+            f"Spawned MQTT broker failed to become ready on {self.mqtt_host}:{self.mqtt_port}: {broker_log.strip()}"
+        )
+
+    def _stop_mqtt_broker(self) -> None:
+        if self._mqtt_broker_proc is None:
+            return
+        self._log("Stopping isolated MQTT broker")
+        proc = self._mqtt_broker_proc
+        self._mqtt_broker_proc = None
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def _allocate_fresh_ha_config_path(self) -> Path:
+        return (self.test_env_root / f"ha_config_{uuid.uuid4().hex}").resolve()
+
+    def _prune_empty_test_env_dirs(self) -> None:
+        current = self.test_env_root
+        allowed_root = (self.repo_root / "test").resolve()
+        while current != allowed_root and current.exists():
+            try:
+                current.rmdir()
+            except OSError:
+                return
+            current = current.parent
+
+    def _prepare_fresh_ha_config(self) -> None:
+        if not self.fresh_ha_config or self._fresh_config_prepared:
+            return
+        allowed_root = (self.repo_root / "test").resolve()
+        if self.reset_fresh_ha_config and self.ha_config_path.exists():
+            if not self.ha_config_path.is_relative_to(allowed_root):
+                raise TestFailure(f"Refusing to delete non-test HA config path: {self.ha_config_path}")
+            self._stop_ha(self.ha_config_path)
+            shutil.rmtree(self.ha_config_path)
+        self.ha_config_path.mkdir(parents=True, exist_ok=True)
+        custom_components_path = self.ha_config_path / "custom_components"
+        custom_components_path.mkdir(parents=True, exist_ok=True)
+        integration_source = self.repo_root / "custom_components" / "panaac_v2"
+        integration_target = custom_components_path / "panaac_v2"
+        if integration_target.is_symlink() or integration_target.exists():
+            if integration_target.is_symlink() and integration_target.resolve() == integration_source.resolve():
+                pass
+            else:
+                if integration_target.is_dir() and not integration_target.is_symlink():
+                    shutil.rmtree(integration_target)
+                else:
+                    integration_target.unlink()
+        if not integration_target.exists():
+            integration_target.symlink_to(integration_source)
+        scaffold = {
+            "configuration.yaml": (
+                "default_config:\n\n"
+                f"homeassistant:\n  name: {self.ha_test_name}\n\n"
+                f"http:\n  server_port: {self.ha_port}\n\n"
+                "automation: !include automations.yaml\n"
+                "script: !include scripts.yaml\n"
+                "scene: !include scenes.yaml\n"
+            ),
+            "automations.yaml": "[]\n",
+            "scripts.yaml": "{}\n",
+            "scenes.yaml": "[]\n",
+        }
+        for filename, contents in scaffold.items():
+            file_path = self.ha_config_path / filename
+            if self.reset_fresh_ha_config or not file_path.exists():
+                file_path.write_text(contents)
+        self.automations_path = self.ha_config_path / "automations.yaml"
+        self.original_automations = self.automations_path.read_text() if self.automations_path.exists() else "[]\n"
+        self._seed_fresh_mqtt_config_entry()
+        self._fresh_config_prepared = True
+
+    def _seed_fresh_mqtt_config_entry(self) -> None:
+        storage_dir = self.ha_config_path / ".storage"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        storage_path = storage_dir / "core.config_entries"
+        payload = self._config_entries_storage_payload(storage_path)
+        entries = payload.setdefault("data", {}).setdefault("entries", [])
+        existing_entry = next((entry for entry in entries if entry.get("domain") == "mqtt"), None)
+        created_at = (
+            existing_entry.get("created_at")
+            if isinstance(existing_entry, dict) and isinstance(existing_entry.get("created_at"), str)
+            else self.timestamp.astimezone().isoformat()
+        )
+        mqtt_data: dict[str, Any] = {
+            "broker": self.mqtt_host,
+            "port": self.mqtt_port,
+            "protocol": "5",
+        }
+        if self.mqtt_user:
+            mqtt_data["username"] = self.mqtt_user
+        if self.mqtt_pass:
+            mqtt_data["password"] = self.mqtt_pass
+        mqtt_entry = {
+            "created_at": created_at,
+            "modified_at": self.timestamp.astimezone().isoformat(),
+            "data": mqtt_data,
+            "disabled_by": None,
+            "discovery_keys": {},
+            "domain": "mqtt",
+            "entry_id": existing_entry.get("entry_id") if isinstance(existing_entry, dict) and existing_entry.get("entry_id") else self._new_config_entry_id(),
+            "minor_version": 1,
+            "options": existing_entry.get("options", {}) if isinstance(existing_entry, dict) else {},
+            "pref_disable_new_entities": False,
+            "pref_disable_polling": False,
+            "source": "user",
+            "subentries": existing_entry.get("subentries", []) if isinstance(existing_entry, dict) else [],
+            "title": self.mqtt_host,
+            "unique_id": None,
+            "version": 2,
+        }
+        for index, entry in enumerate(entries):
+            if entry.get("domain") == "mqtt":
+                entries[index] = mqtt_entry
+                break
+        else:
+            entries.append(mqtt_entry)
+        storage_path.write_text(json.dumps(payload, indent=2) + "\n")
+
+    def _config_entries_storage_payload(self, storage_path: Path) -> dict[str, Any]:
+        if storage_path.exists():
+            return json.loads(storage_path.read_text())
+        storage_key, storage_version, storage_minor_version = self._config_entries_storage_defaults()
+        return {
+            "version": storage_version,
+            "minor_version": storage_minor_version,
+            "key": storage_key,
+            "data": {"entries": []},
+        }
+
+    def _config_entries_storage_defaults(self) -> tuple[str, int, int]:
+        config_entries_source = (self.ha_core_path / "homeassistant" / "config_entries.py").read_text()
+        key_match = re.search(r'^STORAGE_KEY = "([^"]+)"$', config_entries_source, re.MULTILINE)
+        version_match = re.search(r'^STORAGE_VERSION = (\d+)$', config_entries_source, re.MULTILINE)
+        minor_match = re.search(r'^STORAGE_VERSION_MINOR = (\d+)$', config_entries_source, re.MULTILINE)
+        if not (key_match and version_match and minor_match):
+            raise TestFailure("Could not derive Home Assistant config-entry storage defaults from source")
+        return key_match.group(1), int(version_match.group(1)), int(minor_match.group(1))
+
+    def _new_config_entry_id(self) -> str:
+        return uuid.uuid4().hex
+
+    def _bootstrap_fresh_ha_profile(self) -> None:
+        if not self.fresh_ha_config or self._fresh_profile_bootstrapped:
+            return
+        steps = self._get_onboarding_steps()
+        done = {item["step"]: item["done"] for item in steps}
+        if not done.get("user"):
+            self._log("Creating tester user via Home Assistant onboarding")
+            auth_code = self._api_json_request(
+                "/api/onboarding/users",
+                method="POST",
+                data={
+                    "name": self.ha_test_name,
+                    "username": self.ha_test_username,
+                    "password": self.ha_test_password,
+                    "client_id": self._ha_client_id(),
+                    "language": "en",
+                },
+                require_auth=False,
+            )["auth_code"]
+            self.ha_api_token = self._exchange_auth_code_for_access_token(auth_code)
+            done["user"] = True
+        elif self.ha_api_token is None:
+            self.ha_api_token = self._resolve_ha_api_token()
+        if not done.get("core_config"):
+            self._api_json_request("/api/onboarding/core_config", method="POST", data={}, require_auth=True)
+        if not done.get("integration"):
+            self._api_json_request(
+                "/api/onboarding/integration",
+                method="POST",
+                data={"client_id": self._ha_client_id(), "redirect_uri": self._ha_client_id()},
+                require_auth=True,
+            )
+        if not done.get("analytics"):
+            self._api_json_request("/api/onboarding/analytics", method="POST", data={}, require_auth=True)
+        self._wait_for_component_loaded("mqtt")
+        self._ensure_config_entry_via_flow(
+            "panaac_v2",
+            {"device_name": self.device_name, "topic_prefix": self.topic_prefix},
+        )
+        self._wait_for_config_entries("panaac_v2")
+        self._fresh_profile_bootstrapped = True
+
+    def _ha_client_id(self) -> str:
+        return f"{self.ha_base_url}/"
+
+    def _get_onboarding_steps(self) -> list[dict[str, Any]]:
+        payload = self._api_json_request("/api/onboarding", require_auth=False)
+        if not isinstance(payload, list):
+            raise TestFailure(f"Unexpected onboarding payload: {payload!r}")
+        return payload
+
+    def _wait_for_component_loaded(self, domain: str, timeout: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            payload = self._api_json_request(
+                "/api/onboarding/integration/wait",
+                method="POST",
+                data={"domain": domain},
+                require_auth=False,
+            )
+            if payload.get("integration_loaded"):
+                return
+            time.sleep(1.0)
+        raise TestFailure(f"Timed out waiting for Home Assistant component {domain}")
+
+    def _exchange_auth_code_for_access_token(self, auth_code: str) -> str:
+        body = {
+            "grant_type": "authorization_code",
+            "client_id": self._ha_client_id(),
+            "code": auth_code,
+        }
+        request = Request(
+            f"{self.ha_base_url}/auth/token",
+            data=urlencode(body).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode())
+        except HTTPError as err:
+            raise TestFailure(f"HA auth code exchange failed: {err.read().decode(errors='ignore')}") from err
+        except URLError as err:
+            raise TestFailure(f"HA auth code exchange failed: {err}") from err
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise TestFailure(f"HA auth code exchange did not return an access token: {payload!r}")
+        return access_token
+
+    def _api_json_request(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        data: Any | None = None,
+        require_auth: bool = True,
+    ) -> Any:
+        headers: dict[str, str] = {}
+        payload: bytes | None = None
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+            payload = json.dumps(data).encode()
+        if require_auth:
+            if self.ha_api_token is None:
+                self.ha_api_token = self._resolve_ha_api_token()
+            headers["Authorization"] = f"Bearer {self.ha_api_token}"
+        request = Request(f"{self.ha_base_url}{path}", data=payload, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=15) as response:
+                raw = response.read().decode()
+        except HTTPError as err:
+            raise TestFailure(f"HA request failed for {path}: {err.read().decode(errors='ignore')}") from err
+        except URLError as err:
+            raise TestFailure(f"HA request failed for {path}: {err}") from err
+        if not raw:
+            return {}
+        return json.loads(raw)
+
+    def _ensure_config_entry_via_flow(self, handler: str, payload: dict[str, Any]) -> None:
+        for attempt in range(1, 4):
+            started = self._api_json_request(
+                "/api/config/config_entries/flow",
+                method="POST",
+                data={"handler": handler},
+                require_auth=True,
+            )
+            if started.get("type") == "abort":
+                reason = started.get("reason")
+                if reason in {"already_configured", "single_instance_allowed"}:
+                    return
+                raise TestFailure(f"Failed to initialize config flow for {handler}: {started}")
+            flow_id = started.get("flow_id")
+            if not isinstance(flow_id, str):
+                raise TestFailure(f"Config flow for {handler} did not return a flow_id: {started}")
+            result = self._api_json_request(
+                f"/api/config/config_entries/flow/{flow_id}",
+                method="POST",
+                data=payload,
+                require_auth=True,
+            )
+            result_type = result.get("type")
+            if result_type == "create_entry":
+                return
+            if result_type == "abort" and result.get("reason") in {"already_configured", "single_instance_allowed"}:
+                return
+            if handler == "mqtt" and result_type == "form" and result.get("errors", {}).get("base") == "cannot_connect" and attempt < 3:
+                time.sleep(2.0)
+                continue
+            raise TestFailure(f"Config flow for {handler} failed: {result}")
+
+    def _wait_for_config_entries(self, domain: str, timeout: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            entries = self._api_json_request(
+                f"/api/config/config_entries/entry?domain={domain}",
+                require_auth=True,
+            )
+            if isinstance(entries, list) and entries:
+                return
+            time.sleep(1.0)
+        raise TestFailure(f"Timed out waiting for Home Assistant config entry domain {domain}")
 
     def _run_ha_groups(self) -> list[GroupResult]:
         groups: list[GroupResult] = []
@@ -200,7 +637,12 @@ class Runner:
         return groups
 
     def _validate_environment(self) -> None:
-        for cmd in ("mosquitto_pub", "mosquitto_sub", "pgrep", "uv"):
+        if self.fresh_ha_config:
+            self._prepare_fresh_ha_config()
+        required_commands = ["mosquitto_pub", "mosquitto_sub", "pgrep", "uv"]
+        if self.mqtt_broker_mode == "spawn":
+            required_commands.append("mosquitto")
+        for cmd in required_commands:
             if shutil.which(cmd) is None:
                 raise TestFailure(f"Required command not found: {cmd}")
         if not (self.ha_core_path / ".venv" / "bin" / "hass").exists():
@@ -213,6 +655,8 @@ class Runner:
         if target is None:
             return False
         registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
+        if not registry_path.exists():
+            return False
         data = json.loads(registry_path.read_text())
         return any(entity.get("entity_id") == target for entity in data["data"]["entities"])
 
@@ -227,6 +671,8 @@ class Runner:
     def _find_entity_id(self) -> str | None:
         unique_id = f"{self.topic_prefix}_climate"
         registry_path = self.ha_config_path / ".storage" / "core.entity_registry"
+        if not registry_path.exists():
+            return None
         data = json.loads(registry_path.read_text())
         candidates: list[str] = []
         for entity in data["data"]["entities"]:
@@ -775,13 +1221,15 @@ class Runner:
         newer_than: float | None = None,
     ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
-        latest: dict[str, Any] = {}
+        latest: dict[str, Any] | None = {}
         while time.monotonic() < deadline:
             latest = self._read_latest_state()
-            if predicate(latest) and (newer_than is None or float(latest.get("last_updated_ts") or 0.0) > newer_than):
+            if latest is not None and predicate(latest) and (
+                newer_than is None or float(latest.get("last_updated_ts") or 0.0) > newer_than
+            ):
                 return latest
             time.sleep(interval)
-        return latest
+        return latest or {"state": "unavailable"}
 
     def _poll_state_subset(
         self,
@@ -939,6 +1387,12 @@ class Runner:
     def _run_broker_service(self, action: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
         if action not in {"start", "stop"}:
             raise TestFailure(f"Unsupported broker service action: {action}")
+        if self.mqtt_broker_mode == "spawn":
+            if action == "start":
+                self._ensure_mqtt_broker_ready()
+            else:
+                self._stop_mqtt_broker()
+            return subprocess.CompletedProcess(["mosquitto", action], 0, "", "")
         sudo_password = os.environ.get("BROKER_SUDO_PASSWORD")
         if sudo_password:
             cmd = ["sudo", "-S", "systemctl", action, "mosquitto"]
@@ -996,6 +1450,24 @@ class Runner:
                 callback()
             except Exception:
                 continue
+        if self.cleanup_test_config and self.fresh_ha_config:
+            self._delete_fresh_ha_config()
+        self._stop_mqtt_broker()
+
+    def _delete_fresh_ha_config(self) -> None:
+        allowed_root = (self.repo_root / "test").resolve()
+        if not self.ha_config_path.exists():
+            return
+        if not self.ha_config_path.is_relative_to(allowed_root):
+            self._log(f"Skipping cleanup for non-test HA config path: {self.ha_config_path}")
+            return
+        self._log(f"Deleting isolated HA config at {self.ha_config_path}")
+        try:
+            self._stop_ha(self.ha_config_path)
+        except Exception:
+            pass
+        shutil.rmtree(self.ha_config_path, ignore_errors=True)
+        self._prune_empty_test_env_dirs()
 
     def _overall_status(self) -> bool:
         failing_statuses = {"fail", "blocked"} if self.mode == "full-hil" else {"fail"}
@@ -1058,7 +1530,12 @@ class Runner:
         return "target_temperature" if key == "temperature" else key
 
     def _mosquitto_common(self) -> list[str]:
-        return ["-h", self.mqtt_host, "-p", str(self.mqtt_port), "-u", self.mqtt_user, "-P", self.mqtt_pass]
+        cmd = ["-h", self.mqtt_host, "-p", str(self.mqtt_port)]
+        if self.mqtt_user:
+            cmd.extend(["-u", self.mqtt_user])
+        if self.mqtt_pass:
+            cmd.extend(["-P", self.mqtt_pass])
+        return cmd
 
     def _mosquitto_pub_command(self, *, topic: str, payload: str, retain: bool, null_retained: bool) -> list[str]:
         cmd = ["mosquitto_pub", *self._mosquitto_common(), "-t", topic]
@@ -1189,6 +1666,7 @@ class Runner:
                 "esphome_workspace_path": str(self.esphome_workspace_path),
                 "entity_id": self.entity_id,
                 "topic_prefix": self.topic_prefix,
+                "mqtt_broker_mode": self.mqtt_broker_mode,
                 "mqtt_host": self.mqtt_host,
                 "mqtt_port": self.mqtt_port,
                 "mode": self.mode,
@@ -1221,6 +1699,7 @@ class Runner:
             f"Suites: `{', '.join(sorted(self.selected_suites))}`",
             f"Entity: `{self.entity_id}`",
             f"Topic prefix: `{self.topic_prefix}`",
+            f"MQTT broker: `{self.mqtt_broker_mode}` @ {self.mqtt_host}:{self.mqtt_port}",
             "",
             "## Summary",
             "",

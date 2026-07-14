@@ -39,8 +39,10 @@ From `ha/PanaAC_v2_HA`:
 
 ```bash
 python3 test/run_full_test.py stubbed --group all
-python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g1 --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py dev-env
+python3 test/run_full_test.py setup-env
+python3 test/run_full_test.py fresh-env
+python3 test/run_full_test.py run --suite ha.g1 --suite ha.g3
 ```
 
 If you want the lower-level stubbed entrypoint directly:
@@ -149,6 +151,24 @@ and wants a reproducible local test environment.
 
 Commands run from `ha/core` unless noted.
 
+## Runner config
+
+Before HIL commands, create `test/runner_config.json` from `test/runner_config.example.json` and fill in the broker credentials:
+
+```json
+{
+  "mqtt": {
+    "broker_mode": "external",
+    "host": "127.0.0.1",
+    "port": 1883,
+    "user": "mqtt_user",
+    "pass": "mqtt_pass"
+  }
+}
+```
+
+When you use `python3 test/run_full_test.py menu`, the runner will also save prompted MQTT credentials into `test/runner_config.json`. Keep `broker_mode` as `external` when you want to target your existing broker.
+
 ## Automated runner entrypoints
 
 From `ha/PanaAC_v2_HA`:
@@ -156,14 +176,19 @@ From `ha/PanaAC_v2_HA`:
 ```bash
 python3 test/run_full_test.py list
 python3 test/run_full_test.py menu
+python3 test/run_full_test.py dev-env
 python3 test/run_full_test.py stubbed --group all
 python3 test/run_full_test.py stubbed --group state
 python3 test/run_full_test.py stubbed --group commands
-python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py setup-env
+python3 test/run_full_test.py fresh-env
+python3 test/run_full_test.py run --suite ha.g1
+python3 test/run_full_test.py run --suite ha.g3
+python3 test/run_full_test.py run --suite ha.g2
 ```
+
+By default, each `run` invocation creates its own `test/test_env/ha_config_<run-id>` directory, uses it for the selected suites, and deletes it during teardown. Runs that do not include `ha.g3` also default to a spawned isolated MQTT broker on a random localhost port. Pass `--keep-test-config` if you want to preserve the generated HA profile for debugging.
+
 
 From the workspace root `HA/`, the same commands are:
 
@@ -174,22 +199,22 @@ python3 test/run_full_test.py list
 
 Interpretation:
 
+- `dev-env` validates the local Home Assistant developer environment only. It does not prompt for MQTT credentials, start HA, or publish MQTT traffic.
 - `stubbed` covers HA-side subscriptions, state/traits ingestion, command
   publishing, derived `hvac_action`, invalid payload handling, and turn on/off
   behavior without the DUT.
-- `ha.g1` and `ha.g3` are HIL-oriented and use the live HA core config.
-- `ha.g2` is the most runtime-sensitive suite. It now runs against the same
-  live HA core config as `ha.g1`/`ha.g3`, because the isolated copied-config
-  bootstrap proved less reliable than the real HIL path.
+- `setup-env` prepares the HIL path by validating MQTT access, ensuring HA is running, and restoring the retained baseline topics.
+- `fresh-env` prepares a clean isolated HA test profile under `test/test_env/ha_config_<run-id>`, starts it on port `8125`, creates the local `tester` user, and wires an isolated spawned MQTT broker plus `panaac_v2` automatically.
+- `run --suite ...` uses a fresh isolated HA profile by default unless you pass `--ha-config-path` explicitly.
+- `run --suite ha.g1` and `run --suite ha.g2` default to a spawned isolated MQTT broker on a random localhost port so they do not interfere with an existing system broker.
+- Any run that includes `ha.g3` keeps the external-broker default, because the live DUT must already be connected to that broker. Use `--mqtt-broker-mode external` explicitly if you want to override the safer default selection.
 
 ## Current automation status
 
 - `stubbed` pytest path: working and recommended as the first gate
 - `ha.g1`: automated, C3 baseline only
 - `ha.g3`: automated
-- `ha.g2`: automated runner exists on the live HA path; if it fails, use the
-  generated `report.md`, `report.json`, and `ha.log` under the output dir to
-  distinguish runner issues from product regressions
+- `ha.g2`: automated in the fresh-profile path; if it fails, use the generated `report.md`, `report.json`, and `ha.log` under the output dir to distinguish runner issues from product regressions
 
 ## Reading the entity state without the owner password
 
@@ -222,7 +247,7 @@ the state, wait ~2–3 s, then run the snippet.
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite ha.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g1
 ```
 
 ### 1.1 Before first traits
@@ -247,8 +272,11 @@ Result: …
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g2
 ```
+
+By default, each `run` invocation creates its own `test/test_env/ha_config_<run-id>` directory, uses it for the selected suites, and deletes it during teardown. Runs that do not include `ha.g3` also default to a spawned isolated MQTT broker on a random localhost port. Pass `--keep-test-config` if you want to preserve the generated HA profile for debugging.
+
 
 For broker lifecycle coverage:
 
@@ -301,7 +329,7 @@ then recovery when the device republishes. Result: …
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g3
 ```
 
 Create a temporary test automation file at

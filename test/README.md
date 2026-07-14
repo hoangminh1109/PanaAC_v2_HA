@@ -20,7 +20,7 @@ The plan is split into two documents:
 - [`test-specification.md`](test-specification.md) — **what** to test: the
   groups, inputs, expected behaviour, pass/fail criteria.
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
-  commands (incl. a from-scratch developer environment setup, bringing up HA,
+  commands (including a dev-environment-only validation path, HIL environment prep, bringing up HA,
   and reading the recorder DB without the owner password), example automation
   YAML, and how to read results.
 - [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
@@ -66,12 +66,36 @@ The plan is split into two documents:
 Not yet executed. After execution, record results inline in
 `test-execution.md` and commit to this branch.
 
+## Runner config
+
+Create `test/runner_config.json` for local MQTT settings. Start from `test/runner_config.example.json`:
+
+```json
+{
+  "mqtt": {
+    "broker_mode": "external",
+    "host": "127.0.0.1",
+    "port": 1883,
+    "user": "mqtt_user",
+    "pass": "mqtt_pass"
+  }
+}
+```
+
+The real `test/runner_config.json` is ignored by git. Interactive menu flows will save prompted MQTT credentials there automatically. Set `broker_mode` to `external` when you want to reuse an existing broker.
+
+`fresh-env` creates an isolated HA profile under `test/test_env/ha_config_<run-id>`, starts HA on port `8125`, onboards a local `tester` user, starts an isolated MQTT broker on a random localhost port, seeds an MQTT config entry, and adds the `panaac_v2` config entry automatically.
+
 ## Runner usage
 
 - `python3 test/run_full_test.py list`
-- `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
-- `python3 test/run_full_test.py run --suite ha.g1 --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py dev-env`
+- `python3 test/run_full_test.py setup-env`
+- `python3 test/run_full_test.py fresh-env`
+- `python3 test/run_full_test.py run --suite ha.g1 --suite ha.g2`
 - `python3 test/run_full_test.py stubbed --group all`
+
+By default, `run` now creates a brand-new isolated HA profile for that invocation, executes the selected suites against it, and deletes the profile during teardown. Runs that do not include `ha.g3` also default to a spawned isolated MQTT broker on a random localhost port. Use `--keep-test-config` if you need to inspect the generated HA config after a failure.
 - `python3 test/run_full_test.py menu`
 - `python3 test/run_stubbed_pytest.py --group all`
 - `python3 test/run_stubbed_pytest.py --group state`
