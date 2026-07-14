@@ -199,14 +199,14 @@ python3 test/run_full_test.py list
 
 Interpretation:
 
-- `dev-env` validates the local Home Assistant developer environment only. It does not prompt for MQTT credentials, start HA, or publish MQTT traffic.
+- `dev-env` validates the local Home Assistant developer environment only. By default it uses a temporary isolated HA config and a spawned MQTT broker instead of touching `ha/core/config` or your daily broker.
 - `stubbed` covers HA-side subscriptions, state/traits ingestion, command
   publishing, derived `hvac_action`, invalid payload handling, and turn on/off
   behavior without the DUT.
-- `setup-env` prepares the HIL path by validating MQTT access, ensuring HA is running, and restoring the retained baseline topics.
+- `setup-env` prepares the HIL path by validating MQTT access, ensuring HA is running, clearing retained test topics, and restoring the retained baseline topics. By default it uses a temporary isolated HA config and cleans it up afterward.
 - `fresh-env` prepares a clean isolated HA test profile under `test/test_env/ha_config_<run-id>`, starts it on port `8125`, creates the local `tester` user, and wires an isolated spawned MQTT broker plus `panaac_v2` automatically.
 - `run --suite ...` uses a fresh isolated HA profile by default unless you pass `--ha-config-path` explicitly.
-- `run --suite ha.g1` and `run --suite ha.g2` default to a spawned isolated MQTT broker on a random localhost port so they do not interfere with an existing system broker.
+- `run --suite ha.g1` and `run --suite ha.g2` default to a spawned isolated MQTT broker on a random localhost port so they do not interfere with an existing system broker. The runner also clears retained test topics before seeding fresh baseline data unless you pass `--no-flush-mqtt`.
 - Any run that includes `ha.g3` keeps the external-broker default, because the live DUT must already be connected to that broker. Use `--mqtt-broker-mode external` explicitly if you want to override the safer default selection.
 
 ## Current automation status

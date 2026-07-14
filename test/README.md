@@ -84,7 +84,7 @@ Create `test/runner_config.json` for local MQTT settings. Start from `test/runne
 
 The real `test/runner_config.json` is ignored by git. Interactive menu flows will save prompted MQTT credentials there automatically. Set `broker_mode` to `external` when you want to reuse an existing broker.
 
-`fresh-env` creates an isolated HA profile under `test/test_env/ha_config_<run-id>`, starts HA on port `8125`, onboards a local `tester` user, starts an isolated MQTT broker on a random localhost port, seeds an MQTT config entry, and adds the `panaac_v2` config entry automatically.
+`fresh-env` creates an isolated HA profile under `test/test_env/ha_config_<run-id>`, starts HA on port `8125`, onboards a local `tester` user, starts an isolated MQTT broker on a random localhost port, clears retained test topics under the runner topic prefix, seeds an MQTT config entry, and adds the `panaac_v2` config entry automatically.
 
 ## Runner usage
 
@@ -95,7 +95,7 @@ The real `test/runner_config.json` is ignored by git. Interactive menu flows wil
 - `python3 test/run_full_test.py run --suite ha.g1 --suite ha.g2`
 - `python3 test/run_full_test.py stubbed --group all`
 
-By default, `run` now creates a brand-new isolated HA profile for that invocation, executes the selected suites against it, and deletes the profile during teardown. Runs that do not include `ha.g3` also default to a spawned isolated MQTT broker on a random localhost port. Use `--keep-test-config` if you need to inspect the generated HA config after a failure.
+By default, `dev-env`, `setup-env`, and `run` use a brand-new isolated HA profile instead of `ha/core/config` whenever you do not pass `--ha-config-path`. `run` deletes that profile during teardown, and `setup-env`/`dev-env` also clean up after themselves. Runs that do not include `ha.g3` default to a spawned isolated MQTT broker on a random localhost port, and setup paths clear retained test topics before seeding baseline state. Use `--keep-test-config` if you need to inspect the generated HA config after a failure.
 - `python3 test/run_full_test.py menu`
 - `python3 test/run_stubbed_pytest.py --group all`
 - `python3 test/run_stubbed_pytest.py --group state`

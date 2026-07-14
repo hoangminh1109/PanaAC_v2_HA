@@ -165,6 +165,7 @@ class Runner:
                 start_ha=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
                 seed_baseline=bool(self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}),
                 verify_mqtt=True,
+                flush_mqtt=not getattr(self.args, "no_flush_mqtt", False),
             )
             if self.selected_suites & {"ha.g1", "ha.g2", "ha.g3"}:
                 self.entity_id = self.entity_id or self._detect_entity_id()
@@ -200,6 +201,7 @@ class Runner:
         start_ha: bool,
         seed_baseline: bool,
         verify_mqtt: bool,
+        flush_mqtt: bool,
     ) -> EnvironmentStatus:
         status = EnvironmentStatus()
         if self.fresh_ha_config:
@@ -210,6 +212,10 @@ class Runner:
             status.add(f"Started isolated MQTT broker on {self.mqtt_host}:{self.mqtt_port}")
         self._validate_environment()
         status.add("Validated required binaries and local paths")
+        if flush_mqtt:
+            self._log("Clearing retained test MQTT topics")
+            self._clear_test_topics()
+            status.add("Cleared retained test MQTT topics")
         if verify_mqtt:
             self._log("Verifying MQTT broker publish/subscribe round-trip")
             self._verify_mqtt_round_trip()
@@ -239,6 +245,8 @@ class Runner:
     def validate_dev_environment(self) -> EnvironmentStatus:
         if self.fresh_ha_config:
             self._prepare_fresh_ha_config()
+        if self.mqtt_broker_mode == "spawn":
+            self._ensure_mqtt_broker_ready()
         status = EnvironmentStatus()
         if shutil.which("uv") is None:
             raise TestFailure("Required command not found: uv")
@@ -1442,6 +1450,10 @@ class Runner:
         self._publish_retained("traits", RETAINED_BASELINE_TRAITS)
         self._publish_retained("availability", "online")
         self._publish_retained("state", RETAINED_BASELINE_STATE)
+
+    def _clear_test_topics(self) -> None:
+        for suffix in ("traits", "availability", "state", "set"):
+            self._delete_retained(suffix)
 
     def _cleanup(self) -> None:
         while self._cleanup_callbacks:

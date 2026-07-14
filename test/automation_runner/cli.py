@@ -89,11 +89,13 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--no-start-ha", action="store_true", help="Skip starting Home Assistant")
     setup_parser.add_argument("--no-seed-baseline", action="store_true", help="Skip publishing baseline retained topics")
     setup_parser.add_argument("--no-verify-mqtt", action="store_true", help="Skip MQTT broker round-trip validation")
+    setup_parser.add_argument("--no-flush-mqtt", action="store_true", help="Skip clearing retained test MQTT topics before setup")
 
     fresh_parser = subparsers.add_parser("fresh-env", help="Create a fresh isolated HA test environment and prepare it for HIL")
     add_common_arguments(fresh_parser)
     fresh_parser.add_argument("--no-seed-baseline", action="store_true", help="Skip publishing baseline retained topics")
     fresh_parser.add_argument("--no-verify-mqtt", action="store_true", help="Skip MQTT broker round-trip validation")
+    fresh_parser.add_argument("--no-flush-mqtt", action="store_true", help="Skip clearing retained test MQTT topics before setup")
 
     dev_parser = subparsers.add_parser("dev-env", help="Validate the local developer environment only")
     add_common_arguments(dev_parser)
@@ -197,7 +199,7 @@ def ensure_mqtt_credentials(args: argparse.Namespace) -> None:
 def select_default_mqtt_broker_mode(command: str, suites: list[str], explicit: bool, current_mode: str) -> str:
     if explicit:
         return current_mode
-    if command == "fresh-env":
+    if command in {"dev-env", "setup-env", "fresh-env"}:
         return "spawn"
     if command == "run" and "ha.g3" not in suites:
         return "spawn"
@@ -280,8 +282,20 @@ def dispatch(args: argparse.Namespace) -> int:
 
     if args.command == "dev-env":
         args.suites = []
+        args.fresh_ha_config = not getattr(args, "ha_config_path", None)
+        args.reset_fresh_ha_config = args.fresh_ha_config
+        args.cleanup_test_config = args.fresh_ha_config
+        args.mqtt_broker_mode = select_default_mqtt_broker_mode(
+            "fresh-env" if args.fresh_ha_config else "dev-env",
+            [],
+            getattr(args, "mqtt_broker_mode_explicit", False),
+            args.mqtt_broker_mode,
+        )
         runner = Runner(args)
-        status = runner.validate_dev_environment()
+        try:
+            status = runner.validate_dev_environment()
+        finally:
+            runner._cleanup()
         for check in status.checks:
             print(f"- {check}")
         return 0
@@ -293,26 +307,42 @@ def dispatch(args: argparse.Namespace) -> int:
         ensure_mqtt_credentials(args)
         args.fresh_ha_config = True
         args.reset_fresh_ha_config = True
+        args.cleanup_test_config = not args.keep_test_config
         args.suites = []
         runner = Runner(args)
-        status = runner.setup_environment(
-            start_ha=True,
-            seed_baseline=not args.no_seed_baseline,
-            verify_mqtt=not args.no_verify_mqtt,
-        )
+        try:
+            status = runner.setup_environment(
+                start_ha=True,
+                seed_baseline=not args.no_seed_baseline,
+                verify_mqtt=not args.no_verify_mqtt,
+                flush_mqtt=not args.no_flush_mqtt,
+            )
+        finally:
+            runner._cleanup()
         for check in status.checks:
             print(f"- {check}")
         return 0
 
     if args.command == "setup-env":
+        args.mqtt_broker_mode = select_default_mqtt_broker_mode(
+            "setup-env", [], getattr(args, "mqtt_broker_mode_explicit", False), args.mqtt_broker_mode
+        )
+        if not getattr(args, "ha_config_path", None):
+            args.fresh_ha_config = True
+            args.reset_fresh_ha_config = True
+            args.cleanup_test_config = True
         ensure_mqtt_credentials(args)
         args.suites = []
         runner = Runner(args)
-        status = runner.setup_environment(
-            start_ha=not args.no_start_ha,
-            seed_baseline=not args.no_seed_baseline,
-            verify_mqtt=not args.no_verify_mqtt,
-        )
+        try:
+            status = runner.setup_environment(
+                start_ha=not args.no_start_ha,
+                seed_baseline=not args.no_seed_baseline,
+                verify_mqtt=not args.no_verify_mqtt,
+                flush_mqtt=not args.no_flush_mqtt,
+            )
+        finally:
+            runner._cleanup()
         for check in status.checks:
             print(f"- {check}")
         return 0
