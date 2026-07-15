@@ -1,9 +1,0 @@
-{
-  "mqtt": {
-    "broker_mode": "external",
-    "host": "127.0.0.1",
-    "port": 1883,
-    "user": "mqtt_user",
-    "pass": "mqtt_pass"
-  }
-}

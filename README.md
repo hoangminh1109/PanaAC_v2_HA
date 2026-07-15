@@ -6,6 +6,10 @@ MQTT-driven custom integration that exposes a Panasonic AC controller (built wit
 [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome)) as a
 native Home Assistant `ClimateEntity`.
 
+In this workspace, the custom PanaAC v2 repositories now live under
+`panaac_v2/`, and the consolidated shared test workspace is
+`../PanaAC_v2_Testing`.
+
 This integration intentionally avoids the ESPHome native API and the limited
 `climate_ir` fan/swing enums. Instead it uses plain MQTT topics, so the climate
 card can show the full Panasonic fan levels (`Auto`, `Level 1..5`, `Quiet`),
