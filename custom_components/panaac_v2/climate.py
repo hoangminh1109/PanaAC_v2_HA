@@ -107,6 +107,7 @@ class PanaACV2Climate(ClimateEntity):
     _attr_fan_modes: list[str] = []
     _attr_swing_modes: list[str] = []
     _attr_swing_horizontal_modes: list[str] = []
+    _attr_preset_modes: list[str] = []
     _attr_min_temp = 16
     _attr_max_temp = 30
     _attr_target_temperature_step = 0.5
@@ -140,6 +141,7 @@ class PanaACV2Climate(ClimateEntity):
         self._fan_mode = "Auto"
         self._swing_mode = "Auto"
         self._swing_horizontal_mode = "Auto"
+        self._attr_preset_mode = "None"
 
         self._sub_state: dict | None = None
 
@@ -159,6 +161,8 @@ class PanaACV2Climate(ClimateEntity):
             features |= ClimateEntityFeature.SWING_MODE
         if self._attr_swing_horizontal_modes:
             features |= ClimateEntityFeature.SWING_HORIZONTAL_MODE
+        if self._attr_preset_modes:
+            features |= ClimateEntityFeature.PRESET_MODE
         # Advertise turn on/off when the climate has more than one HVAC mode and
         # supports OFF, so it is detected as a thermostat in automations/scripts
         # (matches the built-in esphome climate). The base ClimateEntity
@@ -252,6 +256,9 @@ class PanaACV2Climate(ClimateEntity):
         swing_mode = payload.get("swing_mode")
         if isinstance(swing_mode, str):
             self._swing_mode = swing_mode
+        preset_mode = payload.get("preset_mode")
+        if isinstance(preset_mode, str):
+            self._attr_preset_mode = preset_mode
         horizontal_mode = payload.get("swing_horizontal_mode")
         if isinstance(horizontal_mode, str):
             self._swing_horizontal_mode = horizontal_mode
@@ -285,6 +292,11 @@ class PanaACV2Climate(ClimateEntity):
         swing_modes = payload.get("swing_modes")
         if _is_string_list(swing_modes):
             self._attr_swing_modes = swing_modes
+        preset_modes = payload.get("preset_modes")
+        if _is_string_list(preset_modes):
+            self._attr_preset_modes = preset_modes
+        elif "preset_modes" not in payload:
+            self._attr_preset_modes = []
         horizontal_modes = payload.get("swing_horizontal_modes")
         if _is_string_list(horizontal_modes):
             self._attr_swing_horizontal_modes = horizontal_modes
@@ -339,6 +351,10 @@ class PanaACV2Climate(ClimateEntity):
     async def async_set_swing_horizontal_mode(self, swing_horizontal_mode: str) -> None:
         """Set a new horizontal swing mode."""
         await self._publish_command({"swing_horizontal_mode": swing_horizontal_mode})
+
+    async def async_set_preset(self, preset: str) -> None:
+        """Set a new preset mode."""
+        await self._publish_command({"preset_mode": preset})
 
     async def _publish_command(self, payload: dict) -> None:
         """Publish a command to the device set topic."""
