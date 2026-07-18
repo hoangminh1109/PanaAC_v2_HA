@@ -16,7 +16,7 @@
 
 import json
 import logging
-
+import math
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
@@ -72,6 +72,13 @@ _DEFAULT_SWING_HORIZONTAL_MODES = [
     "Right",
     "Right Max",
 ]
+
+def _is_finite_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 async def async_setup_entry(
@@ -228,14 +235,29 @@ class PanaACV2Climate(ClimateEntity):
         except (json.JSONDecodeError, TypeError):
             _LOGGER.warning("Invalid JSON state payload: %s", msg.payload)
             return
+        if not isinstance(payload, dict):
+            _LOGGER.warning("Invalid JSON state payload shape: expected object, got %s", type(payload).__name__)
+            return
 
         _LOGGER.debug("Received state: %s", payload)
-        self._hvac_mode = self._hvac_mode_from_str(payload.get("mode", "off"))
-        self._target_temperature = payload.get("target_temperature", self._target_temperature)
-        self._fan_mode = payload.get("fan_mode", self._fan_mode)
-        self._swing_mode = payload.get("swing_mode", self._swing_mode)
-        self._swing_horizontal_mode = payload.get("swing_horizontal_mode")
-        self._current_temperature = payload.get("current_temperature")
+        mode = payload.get("mode")
+        if isinstance(mode, str):
+            self._hvac_mode = self._hvac_mode_from_str(mode)
+        target_temperature = payload.get("target_temperature")
+        if _is_finite_number(target_temperature):
+            self._target_temperature = float(target_temperature)
+        fan_mode = payload.get("fan_mode")
+        if isinstance(fan_mode, str):
+            self._fan_mode = fan_mode
+        swing_mode = payload.get("swing_mode")
+        if isinstance(swing_mode, str):
+            self._swing_mode = swing_mode
+        horizontal_mode = payload.get("swing_horizontal_mode")
+        if isinstance(horizontal_mode, str):
+            self._swing_horizontal_mode = horizontal_mode
+        current_temperature = payload.get("current_temperature")
+        if current_temperature is None or _is_finite_number(current_temperature):
+            self._current_temperature = current_temperature
         self._attr_hvac_action = self._derive_hvac_action(
             self._hvac_mode, self._current_temperature, self._target_temperature
         )
@@ -249,25 +271,34 @@ class PanaACV2Climate(ClimateEntity):
         except (json.JSONDecodeError, TypeError):
             _LOGGER.warning("Invalid JSON traits payload: %s", msg.payload)
             return
+        if not isinstance(payload, dict):
+            _LOGGER.warning("Invalid JSON traits payload shape: expected object, got %s", type(payload).__name__)
+            return
 
         _LOGGER.debug("Received traits: %s", payload)
-        if "hvac_modes" in payload:
-            self._attr_hvac_modes = [
-                self._hvac_mode_from_str(m) for m in payload["hvac_modes"]
-            ]
-        if "fan_modes" in payload:
-            self._attr_fan_modes = payload["fan_modes"]
-        if "swing_modes" in payload:
-            self._attr_swing_modes = payload["swing_modes"]
-        if "swing_horizontal_modes" in payload:
-            self._attr_swing_horizontal_modes = payload["swing_horizontal_modes"]
-        else:
+        hvac_modes = payload.get("hvac_modes")
+        if _is_string_list(hvac_modes):
+            self._attr_hvac_modes = [self._hvac_mode_from_str(mode) for mode in hvac_modes]
+        fan_modes = payload.get("fan_modes")
+        if _is_string_list(fan_modes):
+            self._attr_fan_modes = fan_modes
+        swing_modes = payload.get("swing_modes")
+        if _is_string_list(swing_modes):
+            self._attr_swing_modes = swing_modes
+        horizontal_modes = payload.get("swing_horizontal_modes")
+        if _is_string_list(horizontal_modes):
+            self._attr_swing_horizontal_modes = horizontal_modes
+        elif "swing_horizontal_modes" not in payload:
             self._attr_swing_horizontal_modes = []
-        self._attr_min_temp = payload.get("min_temp", self._attr_min_temp)
-        self._attr_max_temp = payload.get("max_temp", self._attr_max_temp)
-        self._attr_target_temperature_step = payload.get(
-            "temp_step", self._attr_target_temperature_step
-        )
+        min_temp = payload.get("min_temp")
+        if _is_finite_number(min_temp):
+            self._attr_min_temp = float(min_temp)
+        max_temp = payload.get("max_temp")
+        if _is_finite_number(max_temp):
+            self._attr_max_temp = float(max_temp)
+        temp_step = payload.get("temp_step")
+        if _is_finite_number(temp_step) and temp_step > 0:
+            self._attr_target_temperature_step = float(temp_step)
         self.async_write_ha_state()
 
     @callback
