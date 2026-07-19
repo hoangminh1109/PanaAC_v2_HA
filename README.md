@@ -15,7 +15,7 @@ Together with [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_E
     <img src="assets/screenshot_panaac.png" alt="PanaAC v1" width="50%">
   - PanaAC v2 combines those controls in the climate entity through the [`PanaAC_v2_HA`](https://github.com/hoangminh1109/PanaAC_v2_HA) integration, providing a cleaner climate-card UI. The native `(v1)` climate and selects remain available by default; in v2 MQTT mode, set `hide_legacy_comps: true` to hide them from Home Assistant and use only the PanaAC v2 climate entity.
 
-    <img src="assets/screenshot_panaac_v2.png" alt="PanaAC v2" width="50%"> <img src="assets/screenshot_panaac_v2_tilecard.png" alt="PanaAC v2" width="40%">
+    <img src="assets/screenshot_panaac_v2.png" alt="PanaAC v2" width="50%"> <img src="assets/screenshot_panaac_v2_tilecard.png" alt="PanaAC v2" width="32%">
 
 -------
 This is an MQTT-driven custom integration that exposes a Panasonic AC controller (built with
