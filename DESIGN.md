@@ -59,7 +59,7 @@ Default topic prefix: `panaac_v2/esphome-panaac-v2`.
 ```json
 {
   "hvac_modes": ["off", "cool", "heat", "fan_only", "dry", "auto"],
-  "fan_modes": ["Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Quiet"],
+  "fan_modes": ["Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Quiet", "Powerful"],
   "swing_modes": ["Auto", "Highest", "High", "Middle", "Low", "Lowest"],
   "swing_horizontal_modes": ["Auto", "Left Max", "Left", "Middle", "Right", "Right Max"],
   "min_temp": 16,
@@ -185,9 +185,6 @@ available once the device publishes `online`.
   humidity setpoint ever becomes meaningful (for example a separate
   dehumidifier or a humidity-sensor-driven automation), add the feature flag,
   the attribute, the setter, and a `target_humidity` field in the state payload.
-- **Preset mode (not supported).** The Panasonic IR protocol as implemented has
-  no preset/economy concept, so the entity exposes no
-  `ClimateEntityFeature.PRESET_MODE`, no `_attr_preset_mode` / `_attr_preset_modes`,
-  and no `async_set_preset_mode`; the `climate.set_preset_mode` service and any
-  preset-gated triggers/conditions are not available. Add this only if a real
-  preset (for example mapping the `Quiet` fan level) is defined.
+- **Preset mode.** The entity exposes `Normal`, `Powerful`, and `Eco` when the device
+  advertises those capabilities. `Powerful` and `Eco` map to the Panasonic IR preset bits;
+  `Normal` clears the active preset. Presets are accepted only in Auto, Cool, and Dry modes.

@@ -141,7 +141,7 @@ class PanaACV2Climate(ClimateEntity):
         self._fan_mode = "Auto"
         self._swing_mode = "Auto"
         self._swing_horizontal_mode = "Auto"
-        self._attr_preset_mode = "None"
+        self._attr_preset_mode = "Normal"
 
         self._sub_state: dict | None = None
 
@@ -352,9 +352,9 @@ class PanaACV2Climate(ClimateEntity):
         """Set a new horizontal swing mode."""
         await self._publish_command({"swing_horizontal_mode": swing_horizontal_mode})
 
-    async def async_set_preset(self, preset: str) -> None:
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set a new preset mode."""
-        await self._publish_command({"preset_mode": preset})
+        await self._publish_command({"preset_mode": preset_mode})
 
     async def _publish_command(self, payload: dict) -> None:
         """Publish a command to the device set topic."""

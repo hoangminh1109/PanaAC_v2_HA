@@ -12,7 +12,8 @@
               "Level 3": "mdi:numeric-3",
               "Level 4": "mdi:numeric-4",
               "Level 5": "mdi:numeric-5",
-              "Quiet": "mdi:weather-night"
+              "Quiet": "mdi:weather-night",
+              "Powerful": "mdi:rocket-launch"
             }
           },
           "swing_mode": {
@@ -24,6 +25,15 @@
               "Middle": "mdi:drag-horizontal-variant",
               "Low": "mdi:arrow-down",
               "Lowest": "mdi:arrow-collapse-down"
+            }
+          },
+          "preset_mode": {
+            "default": "mdi:circle-medium",
+            "state": {
+              "Normal": "mdi:fan-off",
+              "None": "mdi:fan-off",
+              "Powerful": "mdi:rocket-launch",
+              "Eco": "mdi:leaf"
             }
           },
           "swing_horizontal_mode": {

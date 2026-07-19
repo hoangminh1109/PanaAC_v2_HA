@@ -137,7 +137,7 @@ actions:
     target:
       entity_id: climate.living_room
     data:
-      fan_mode: "Level 2"    # Auto | Level 1..5 | Quiet
+      fan_mode: "Level 2"    # Auto | Level 1..5 | Quiet | Powerful
 
   - action: climate.set_swing_mode
     target:
