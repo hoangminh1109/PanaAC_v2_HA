@@ -2,6 +2,10 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
+**_This project is maintained in my free time. A coffee ☕ is always appreciated!_**
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/hoangminh1109)
+
 MQTT-driven custom integration that exposes a Panasonic AC controller (built with
 [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome)) as a
 native Home Assistant `ClimateEntity`.
