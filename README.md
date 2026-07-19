@@ -6,7 +6,19 @@
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/hoangminh1109)
 
-MQTT-driven custom integration that exposes a Panasonic AC controller (built with
+------
+
+Together with [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome), this custom integration is the second generation of [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome). It addresses the earlier UI limitation of separate fan-level, vertical-swing, and horizontal-swing selects:
+
+  - PanaAC v1 exposes separate fan-level, vertical-swing, and horizontal-swing selects alongside the climate entity in the ESPHome device.
+
+    <img src="assets/screenshot_panaac.png" alt="PanaAC v1" width="50%">
+  - PanaAC v2 combines those controls in the climate entity through the [`PanaAC_v2_HA`](https://github.com/hoangminh1109/PanaAC_v2_HA) integration, providing a cleaner climate-card UI. The native `(v1)` climate and selects remain available by default; in v2 MQTT mode, set `hide_legacy_comps: true` to hide them from Home Assistant and use only the PanaAC v2 climate entity.
+
+    <img src="assets/screenshot_panaac_v2.png" alt="PanaAC v2" width="50%"> <img src="assets/screenshot_panaac_v2_tilecard.png" alt="PanaAC v2" width="40%">
+
+-------
+This is an MQTT-driven custom integration that exposes a Panasonic AC controller (built with
 [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome)) as a
 native Home Assistant `ClimateEntity`.
 
@@ -158,12 +170,6 @@ actions:
 
 `turn_on` / `turn_off` / `toggle` take only `target:` (no `data:`) and appear
 once the device advertises more than one HVAC mode that includes `off`.
-
-> `hvac_action` is *derived* from the commanded mode (the controller is one-way
-> IR and cannot report whether the compressor is actually running), so
-> `started_cooling` / `is_cooling` reflect the mode the unit was commanded to,
-> not verified compressor activity. See [`DESIGN.md`](DESIGN.md) for the full
-> mapping.
 
 ## More documentation
 
