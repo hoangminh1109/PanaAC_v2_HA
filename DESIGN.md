@@ -185,6 +185,6 @@ available once the device publishes `online`.
   humidity setpoint ever becomes meaningful (for example a separate
   dehumidifier or a humidity-sensor-driven automation), add the feature flag,
   the attribute, the setter, and a `target_humidity` field in the state payload.
-- **Preset mode.** The entity exposes `Normal`, `Powerful`, and `Eco` when the device
+- **Preset mode.** The entity exposes `None`, `Powerful`, and `Eco` when the device
   advertises those capabilities. `Powerful` and `Eco` map to the Panasonic IR preset bits;
-  `Normal` clears the active preset. Presets are accepted only in Auto, Cool, and Dry modes.
+  `None` clears the active preset. Presets are accepted only in Auto, Cool, and Dry modes.

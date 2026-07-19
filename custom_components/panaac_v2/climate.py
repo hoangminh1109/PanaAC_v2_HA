@@ -141,7 +141,7 @@ class PanaACV2Climate(ClimateEntity):
         self._fan_mode = "Auto"
         self._swing_mode = "Auto"
         self._swing_horizontal_mode = "Auto"
-        self._attr_preset_mode = "Normal"
+        self._attr_preset_mode = "None"
 
         self._sub_state: dict | None = None
 
