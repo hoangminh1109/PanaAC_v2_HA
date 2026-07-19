@@ -1,4 +1,4 @@
-# PanaAC v2 — Home Assistant custom integration
+# PanaAC v2 — Home Assistant custom integration for controlling Panasonic AC via Infrared
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
@@ -8,7 +8,7 @@
 
 ------
 
-Together with [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome), this custom integration is the second generation of [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome). It addresses the earlier UI limitation of separate fan-level, vertical-swing, and horizontal-swing selects:
+Together with [`PanaAC_v2_ESPHome`](https://github.com/hoangminh1109/PanaAC_v2_ESPHome), this custom integration is part of second generation of [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome). It addresses the earlier UI limitation of separate fan-level, vertical-swing, and horizontal-swing selects:
 
   - PanaAC v1 exposes separate fan-level, vertical-swing, and horizontal-swing selects alongside the climate entity in the ESPHome device.
 
@@ -176,3 +176,7 @@ once the device advertises more than one HVAC mode that includes `off`.
 - [`DESIGN.md`](DESIGN.md) — architecture, MQTT topic contract, HA entity design.
 - [`INSTALL.md`](INSTALL.md) — step-by-step installation, broker setup and
   troubleshooting.
+
+## AI GENERATED CONTENTS
+
+- This PanaAC v2 project is vibe coded with the help of AI Agents (Codex & Claude), using various models cross checked each other - gpt 5.5, gpt 5.6, opus 4.6, glm 5.2, minimax-m3, kimi-k2.7-code).
