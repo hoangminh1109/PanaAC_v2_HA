@@ -1,5 +1,5 @@
 {
-  "name": "Panasonic AC v2 (MQTT)",
+  "name": "PanaAC v2 (MQTT)",
   "hacs": "2.0.0",
   "render_readme": true
 }
