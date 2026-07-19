@@ -30,7 +30,7 @@
           "preset_mode": {
             "default": "mdi:circle-medium",
             "state": {
-              "None": "mdi:alpha-n",
+              "None": "mdi:power-off",
               "Powerful": "mdi:rocket-launch",
               "Eco": "mdi:leaf"
             }
